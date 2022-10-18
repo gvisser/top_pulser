@@ -39,6 +39,10 @@ entity calpulser is
     ad: out std_logic_vector(0 to 7);
     apclk_p,apclk_n: in std_logic;
     apclk_fb_pad: inout std_logic;      -- not connected on PCB, used for MMCM FB
+    bsel,bsync: out std_logic;
+    bd: out std_logic_vector(0 to 7);
+    -- bpclk_p,bpclk_n: in std_logic; -- not used, for now, use apclk for both (check w/ scope if a sane plan!)
+
     auxo0_n: out std_logic
     );
 end calpulser;
@@ -46,9 +50,7 @@ end calpulser;
 architecture calpulser_0 of calpulser is
   attribute PULLTYPE: string;
   attribute PULLTYPE of pllsdo,asdo: signal is "PULLDOWN";
-  -- that was PULLUP, but for asdo,bsdo I think pulldown will be better, and either should function
-  -- ok, so let's try this this way
-  signal apclk,clkreset: std_logic;
+  signal apclk: std_logic;
   signal init_delay: integer range 0 to 2**16-1;-- := 1;
   signal pp_delay: integer range 0 to 2**16-1;-- := 20;  -- for now, pp_delay+p_width MUST be >8 !!
   signal p_width: integer range 0 to 2**16-1;-- := 9;
@@ -63,13 +65,12 @@ begin
 
   pllsdi <= pi_mosi;
   pllsclk <= pi_sclk;
-  pllcs_n <= not ((not pi_cs1_n) and (not csr_main(9*8-1)));
+  pllcs_n <= not ((not pi_cs1_n) and csr_main(csr_main'high));
   asdi <= pi_mosi;
   asclk <= pi_sclk;
-  acs_n <= not ((not pi_cs1_n) and csr_main(9*8-1));
+  acs_n <= not ((not pi_cs1_n) and csr_main(csr_main'high-1));
+  -- b vga on csr high-2
 
-  clkreset <= csr_main(9*8-2);
-  
   -- local control registers (SPI device 0)
   -- Currently this does not support read-only, but I could easily use a bit in the written data (in
   -- shadow register) to select whether to really write the data out. Do this later, if relevant.
@@ -96,13 +97,13 @@ begin
     begin
       -- copy to register at the end of the read/write sequence
       if pi_cs0_n'event and pi_cs0_n='1' then
-        if k=csr_main'high+1 then                     -- ONLY if we got exactly the expected number of sclk's !!
+        if k=csr_main'high+1 then      -- ONLY if we got EXACTLY the expected number of sclk's !!
           csr_main <= csr_main_shadow; -- if there will be some read-only bits in future, leave them out of this of course
         end if;
       end if;
     end process;
     pi_miso <= csr_main_shadow(csr_main'high) when pi_cs0_n='0'
-               else pllsdo when csr_main(9*8-1)='0'
+               else pllsdo when csr_main(csr_main'high)='1'
                else asdo;
   end block csr_blk;
   init_delay <= to_integer(unsigned(csr_main(55 downto 40)));
@@ -113,7 +114,11 @@ begin
   clksel <= '1';
 
   asel <= '1';
-  async <= '0';
+  bsel <= '1';
+  async <= csr_main(csr_main'high-3);
+  bsync <= csr_main(csr_main'high-3);
+
+  bd <= (others => '0');
 
   -- old stuff, save for now, but really not the way to do it!
   --x1: IBUFDS port map(I=> apclk_p, IB => apclk_n, O => apclk_i);  if re-instating, invert here for sanity?
@@ -136,7 +141,7 @@ begin
                   DIVCLK_DIVIDE => 1, -- refclk divisor
                   STARTUP_WAIT => FALSE)
       port map(CLKIN1 => apclk_i_bufg, CLKFBIN => apclk_fb_bufg, CLKOUT0 => apclk_x,
-               PWRDWN => '0', RST => clkreset);
+               PWRDWN => '0', RST => csr_main(csr_main'high-4));
     x4: ODDR port map(C => apclk, Q => apclk_fb_pad_o,
                       CE => '1', D1 => '1', D2 => '0', R => '0', S => '0');
     x5: IOBUF port map(I => apclk_fb_pad_o, T => '0', IO => apclk_fb_pad, O => apclk_fb_pad_i);

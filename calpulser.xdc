@@ -27,6 +27,17 @@ set_property PACKAGE_PIN W19 [get_ports apclk_p]
 set_property PACKAGE_PIN W20 [get_ports apclk_n]
 set_property PACKAGE_PIN V18 [get_ports apclk_fb_pad]; # not connected on PCB
 set_property SLEW FAST [get_ports apclk_fb_pad]
+set_property PACKAGE_PIN B22 [get_ports bsel]
+set_property PACKAGE_PIN J22 [get_ports bsync]
+set_property PACKAGE_PIN H22 [get_ports {bd[0]}]
+set_property PACKAGE_PIN H20 [get_ports {bd[1]}]
+set_property PACKAGE_PIN G22 [get_ports {bd[2]}]
+set_property PACKAGE_PIN G21 [get_ports {bd[3]}]
+set_property PACKAGE_PIN E22 [get_ports {bd[4]}]
+set_property PACKAGE_PIN E21 [get_ports {bd[5]}]
+set_property PACKAGE_PIN D22 [get_ports {bd[6]}]
+set_property PACKAGE_PIN D21 [get_ports {bd[7]}]
+set_property SLEW FAST [get_ports {bd[*]}]
 set_property PACKAGE_PIN P6 [get_ports auxo0_n]
 
 
