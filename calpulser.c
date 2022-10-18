@@ -1,5 +1,7 @@
-/*
-  SPI handling based on examples at https://github.com/sckulkarni246/ke-rpi-samples/tree/main/spi-c-ioctl
+/*  Belle-II TOP Calibration Pulser
+    Gerard Visser, Indiana University
+
+SPI handling based on examples at https://github.com/sckulkarni246/ke-rpi-samples/tree/main/spi-c-ioctl
 */
 
 #include <stdio.h>
@@ -15,7 +17,6 @@
 //#include <linux/ioctl.h>   // is this really needed? seems like not
 //#include <linux/types.h>   // is this really needed? seems like not
 #include <linux/spi/spidev.h>
-
 
 int main(int argc, char *argv[]) {
   extern char *optarg;
@@ -115,6 +116,7 @@ int main(int argc, char *argv[]) {
     exit(-1);
   }
 
+  //-----------------------------------------------------------------------------------------------
   // main CSR (device 0), may branch this off into addressable parts someday later
   // 0,1:  main CSR [15:0]
   //     15: enable SPI 1 to PLL (LTC6951)     use one only of these enable bits at a time!
@@ -129,8 +131,8 @@ int main(int argc, char *argv[]) {
   // 4,5:  A pp_delay 0 to 2**16-1
   // 6,7:  A p_width 0 to 2**16-1
   // 8:    A npulses-1, 0 to 2**4-1
-  // set device 1 to the PLL (using device 0)
-  tx_buf[0] = 0x80;
+  //-----------------------------------------------------------------------------------------------
+  tx_buf[0] = 0x90; // set device 1 to the PLL (using device 0), and assert MC100EP446 SYNC
   tx_buf[1] = 0x00;
   tx_buf[2]=init_delay>>8;
   tx_buf[3]=init_delay&0xff;
@@ -161,37 +163,31 @@ int main(int argc, char *argv[]) {
   // R=12, N=510, P=2.5 works for 1.7 GHz but beware w/ P=2.5 and Mx=1 the duty cycle is not 50%
   
   tx_buf[0] = 0x01*2+0;  // start write at register 0x01
-  tx_buf[1] = 0x3a;    // STAT= ALCHI or ALCLO or (not LOCK) or (not REFOK)
-  tx_buf[2] = 0x00;    // nothing powered down; for cal we use autocal so don't set it here
-  tx_buf[3] = 0x7e;    // ALC: during cal only, monitor level always, autocal enabled, RA0=1, low level ref input
-  tx_buf[4] = 0x17;    // B=12 (for fPFD=3.333 MHz), LKWIN 10.7ns, LKCNT 2048
+  tx_buf[1] = 0x3a;   // reg 1: STAT= ALCHI or ALCLO or (not LOCK) or (not REFOK)
+  tx_buf[2] = 0x04;   // reg 2: SYNC asserted; nothing powered down; for cal we use autocal so don't set it here
+  tx_buf[3] = 0x7e;   // reg 3: ALC: during cal only, monitor level always, autocal enabled, RA0=1, low level ref input
+  tx_buf[4] = 0x17;   // reg 4: B=12 (for fPFD=3.333 MHz), LKWIN 10.7ns, LKCNT 2048
+  // it would seem I didn't really implement pll_R here -- FIX THIS! !! !!! !!!! !!!!!
   tx_buf[5] = 0x30 | ((pll_N&0x300)>>8); //0x31;    // |
   tx_buf[6] = (pll_N&0xff);    // | R=12, N=300
-  tx_buf[7] = 0x05;    // CP: no overrides, not WIDE, 5.6 mA
+  tx_buf[7] = 0x05;   // reg 7: CP: no overrides, not WIDE, 5.6 mA
   tx_buf[8] = (((int)((pll_P-1.999)*2))&0x07)<<5;    // no mute
-  tx_buf[9] = 0x80;    // out0: sync enable, no mute, M=1
-  tx_buf[10] = 0x00;   // SN=0 SR=0
-  tx_buf[11] = 0x80;   // out1: sync enable, no mute, M=1
-  tx_buf[12] = 0x00;   // out1: delay 0
-  tx_buf[13] = 0x80;   // out2: sync enable, no mute, M=1
-  tx_buf[14] = 0x00;   // out2: delay 0
-  tx_buf[15] = 0x80;   // out3: sync enable, no mute, M=1
+  tx_buf[9] = 0x80;   // reg 8: out0: sync enable, no mute, M=1
+  tx_buf[10] = 0x00;  // reg 9: SN=0 SR=0
+  tx_buf[11] = 0x80;  // reg 10: out1: sync enable, no mute, M=1
+  tx_buf[12] = 0x00;  // reg 11: out1: delay 0
+  tx_buf[13] = 0x80;  // reg 13: out2: sync enable, no mute, M=1
+  tx_buf[14] = 0x00;  // reg 14: out2: delay 0
+  tx_buf[15] = 0x80;  // reg 15: out3: sync enable, no mute, M=1
   // best polarity for various clocks has to be investigated still   !!! CAUTION !!!
-  tx_buf[16] = 0x40;   // out3: delay 0, let's invert (better FF clock timing?)
-  tx_buf[17] = 0x83;   // out4: sync enable, no mute, M=8
-  tx_buf[18] = 0x06;   // out4: delay 6 (this gets phase aligned with 0-3)
+  tx_buf[16] = 0x40;  // reg 16: out3: delay 0, let's invert (better FF clock timing?)
+  tx_buf[17] = 0x83;  // reg 17: out4: sync enable, no mute, M=8
+  tx_buf[18] = 0x06;  // reg 18: out4: delay 6 (this gets it phase aligned with out0-3)
   spit[1].len = 19;
   ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
   if(ret<0) {
     perror("[1] SPI transfer ioctl ERROR");
   }
-  // that was a write and LTC6951 does not send any interesting data back, so no point to dump it
-  /* printf("Received SPI buffer: "); */
-  /* for(k=0; k<spit.len;k++) { */
-  /*   printf("%02x ",rx_buf[k]); */
-  /* } */
-  /* printf("\n"); */
-
   usleep(500000);  // wait for lock & stabilization
 
   // read and check
@@ -206,15 +202,14 @@ int main(int argc, char *argv[]) {
     printf("%02x ",rx_buf[k]);
   }
   printf("\n");
-  printf("check those bits -- locked?\n");//  (handle this better later)
+  if (rx_buf[1]==0x05)
+    printf("LTC6951 status GOOD (locked, ALC ok, REF ok)\n");
+  else
+    printf("WARNING: LTC6951 status reads no good! 0x%02x\n",rx_buf[1]);
 
-  // NEED TO DO SYNC SEQUENCE HERE - SEE DATASHEET - DOESN'T MATTER RIGHT NOW SO I SKIPPED IT
-
-  // end of LTC6951 setup
-
-  // do MMCM reset bit...  
-  // set device 1 to the VGA A (using device 0) & set pulse characteristics (move that stuff, I think)
-  tx_buf[0] = 0x48;
+  // do MC100EP446 SYNC stuff now (not implemented yet)
+  printf("releasing MC100EP446 SYNC...\n");
+  tx_buf[0] = 0x80; // keep device 1 to the PLL (using device 0), and release MC100EP446 SYNC
   tx_buf[1] = 0x00;
   tx_buf[2]=init_delay>>8;
   tx_buf[3]=init_delay&0xff;
@@ -233,7 +228,60 @@ int main(int argc, char *argv[]) {
     printf("%02x ",rx_buf[k]);
   }
   printf("\n");
-  // set device 1 to the VGA A (using device 0) & set pulse characteristics (move that stuff, I think)
+  usleep(50000); // short wait
+
+  // release LTC6951 SYNC
+  printf("releasing LTC6951 SYNC...\n");
+  tx_buf[0] = 0x02*2+0;  // start write at register 0x02
+  tx_buf[1] = 0x00;  // reg 2: SYNC deasserted; nothing powered down; for cal we use autocal so don't set it here
+  spit[1].len = 2;
+  ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
+  if(ret<0) {
+    perror("[1] SPI transfer ioctl ERROR");
+  }
+  // read and check
+  tx_buf[0] = 0x00*2+1; // start read at register 00
+  spit[1].len=21;
+  ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
+  if(ret<0) {
+    perror("[1] SPI transfer ioctl ERROR");
+  }
+  printf("[1] Received SPI buffer: ");
+  for(k=0; k<spit[1].len;k++) {
+    printf("%02x ",rx_buf[k]);
+  }
+  printf("\n");
+  if (rx_buf[1]==0x05)
+    printf("LTC6951 status GOOD (locked, ALC ok, REF ok)\n");
+  else
+    printf("WARNING: LTC6951 status reads no good! 0x%02x\n",rx_buf[1]);
+  usleep(50000); // short wait
+  // end of LTC6951 setup
+
+  // do MMCM reset bit...
+  printf("doing FPGA MMCM reset...\n");
+  // set device 1 to the VGA A (using device 0) & set pulse characteristics
+  tx_buf[0] = 0x48;  // and asser MMCM reset
+  tx_buf[1] = 0x00;
+  tx_buf[2]=init_delay>>8;
+  tx_buf[3]=init_delay&0xff;
+  tx_buf[4]=pp_delay>>8;
+  tx_buf[5]=pp_delay&0xff;
+  tx_buf[6]=p_width>>8;
+  tx_buf[7]=p_width&0xff;
+  tx_buf[8]=npulses-1;
+  spit[0].len = 9;
+  ret = ioctl(spifd[0], SPI_IOC_MESSAGE(1), &spit[0]);
+  if(ret<0) {
+    perror("[0] SPI transfer ioctl ERROR");
+  }
+  printf("[0] Received SPI buffer: ");
+  for(k=0; k<spit[0].len;k++) {
+    printf("%02x ",rx_buf[k]);
+  }
+  printf("\n");
+  usleep(50000);
+  // set device 1 to the VGA A (using device 0) & set pulse characteristics
   tx_buf[0] = 0x40;  // release the MMCM reset
   tx_buf[1] = 0x00;
   tx_buf[2]=init_delay>>8;
@@ -253,8 +301,15 @@ int main(int argc, char *argv[]) {
     printf("%02x ",rx_buf[k]);
   }
   printf("\n");
+  usleep(50000);
+  // clocks are all stable (one hopes) and we are addressed to VGA A, proceed with that
 
-  // test
+  // NOTE: FOR NOW, the channels will not be properly synchronized despite we did this probably correctly (TBD).
+  // I snafu'd the board and used OUT0 for channel B serializer, but OUT0 does not mute for the LTC6951 SYNC, and so
+  // channel B serializer has no chance to get in sync with channel A one. I could set RAO=0 for the LTC6951 but that will
+  // cause problems to use FTSW trigger/clock input (I think). Or I could (maybe) patch the board to swap the clock lines
+  // of OUT1 and OUT0, which will put OUT0 to one of the pulser FF's (which don't care about this snafu). Will try that.
+
   // set gain
   tx_buf[0] = 0x02;
   tx_buf[1] = atten&0x3f;
