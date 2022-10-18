@@ -116,11 +116,16 @@ int main(int argc, char *argv[]) {
   }
 
   // main CSR (device 0), may branch this off into addressable parts someday later
-  // 0,1:  main CSR
-  // 2,3:  init_delay 0 to 2**16-1
-  // 4,5:  pp_delay 0 to 2**16-1
-  // 6,7:  p_width 0 to 2**16-1
-  // 8:    npulses-1, 0 to 2**4-1
+  // 0,1:  main CSR [15:0]
+  //     15: enable SPI 1 to channel A VGA (LMH6401)
+  //     14: APCLK MMCM reset bit
+  //     13-0 not used
+  //         to be added: ch B VGA, A/B MC100EP446 SYNC bit, A & B polarity bits, A & B enable bits
+  //to be added: 32 bits trigger timer
+  // 2,3:  A init_delay 0 to 2**16-1
+  // 4,5:  A pp_delay 0 to 2**16-1
+  // 6,7:  A p_width 0 to 2**16-1
+  // 8:    A npulses-1, 0 to 2**4-1
   // set device 1 to the PLL (using device 0)
   tx_buf[0] = 0x00;
   tx_buf[1] = 0x00;
