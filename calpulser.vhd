@@ -118,7 +118,7 @@ begin
   async <= csr_main(csr_main'high-3);
   bsync <= csr_main(csr_main'high-3);
 
-  bd <= (others => '0');
+  --bd <= (others => '0');
 
   -- old stuff, save for now, but really not the way to do it!
   --x1: IBUFDS port map(I=> apclk_p, IB => apclk_n, O => apclk_i);  if re-instating, invert here for sanity?
@@ -191,6 +191,7 @@ begin
         end if;
       end if;
       ad <= ad_pre; -- extra pipeline stage here harmless, and might help timing
+      bd <= ad_pre; -- testing hack just use A data for first try
     end if;
   end process;
 
