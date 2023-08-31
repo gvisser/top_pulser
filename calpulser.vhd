@@ -48,6 +48,11 @@ entity calpulser is
 end calpulser;
 
 architecture calpulser_0 of calpulser is
+  -- this stuff is temporarily needed to duplicate the output data from A onto B
+  signal ad_int,bd_int: std_logic_vector(ad'range);
+  attribute KEEP: string;
+  attribute KEEP of ad_int,bd_int: signal is "true";
+  -- end of that
   attribute PULLTYPE: string;
   attribute PULLTYPE of pllsdo,asdo: signal is "PULLDOWN";
   signal apclk: std_logic;
@@ -190,9 +195,15 @@ begin
           end if;
         end if;
       end if;
-      ad <= ad_pre; -- extra pipeline stage here harmless, and might help timing
-      bd <= ad_pre; -- testing hack just use A data for first try
+      -- ad <= ad_pre;   put this back; had to make explicit ad_int bd_int so as not to optimize
+      -- away the registers for this test
+      -- also in xdc file, "_d_int_reg" --> _d_reg again...
+      ad_int <= ad_pre; -- extra pipeline stage here harmless, and might help timing
+      bd_int <= ad_pre; -- testing hack just use A data for first try
     end if;
   end process;
+
+  ad <= ad_int;
+  bd <= bd_int;
 
 end calpulser_0;

@@ -61,7 +61,8 @@ create_clock -period 500.0 [get_ports pi_cs0_n]
 set_false_path -from [get_clocks pi_cs0_n] -to [get_clocks apclk_x]; # apclk_x is name of derived clk out of MMCM
 
 # can't this be "auto" ???
-set_property IOB TRUE [get_cells {ad_reg[*]}]
+set_property IOB TRUE [get_cells {ad_int_reg[*]}]
+set_property IOB TRUE [get_cells {bd_int_reg[*]}]
 set_property IOB TRUE [get_cells auxo0_n_reg]
 # I should add some output constraint here... Maybe that automatically gets me IOFF???
 # BTW this seems OK for 125 MHz PCLK but not for 250. Will need to run PCLK input through DCM to get rid of some delay... Later
