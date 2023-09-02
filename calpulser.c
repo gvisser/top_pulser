@@ -163,7 +163,7 @@ int main(int argc, char *argv[]) {
   // R=12, N=510, P=2.5 works for 1.7 GHz but beware w/ P=2.5 and Mx=1 the duty cycle is not 50%
   
   tx_buf[0] = 0x01*2+0;  // start write at register 0x01
-  tx_buf[1] = 0x3a;   // reg 1: STAT= ALCHI or ALCLO or (not LOCK) or (not REFOK)
+  tx_buf[1] = 0xba;   // reg 1: STAT = not (ALCHI or ALCLO or (not LOCK) or (not REFOK)) = "PLLOK"
   tx_buf[2] = 0x04;   // reg 2: SYNC asserted; nothing powered down; for cal we use autocal so don't set it here
   tx_buf[3] = 0x7e;   // reg 3: ALC: during cal only, monitor level always, autocal enabled, RA0=1, low level ref input
   tx_buf[4] = 0x17;   // reg 4: B=12 (for fPFD=3.333 MHz), LKWIN 10.7ns, LKCNT 2048

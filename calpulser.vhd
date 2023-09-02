@@ -31,7 +31,7 @@ entity calpulser is
     pi_sclk,pi_mosi,pi_cs0_n,pi_cs1_n: in std_logic;
     pi_miso: out std_logic;
     pllsclk,pllsdi,pllcs_n: out std_logic;
-    pllsdo: in std_logic;
+    pllsdo,pllstat: in std_logic;
     asclk,asdi,acs_n: out std_logic;
     asdo: in std_logic;
 
@@ -43,6 +43,7 @@ entity calpulser is
     bd: out std_logic_vector(0 to 7);
     -- bpclk_p,bpclk_n: in std_logic; -- not used, for now, use apclk for both (check w/ scope if a sane plan!)
 
+    led_n: out std_logic_vector(3 downto 0);
     auxo0_n: out std_logic
     );
 end calpulser;
@@ -68,6 +69,12 @@ architecture calpulser_0 of calpulser is
   signal csr_main: std_logic_vector(9*8-1 downto 0) := (others => '0');
 begin
 
+  -- LED's viewed from front:  0  1  2  3
+  led_n(0) <= '0';            -- "FPGA up"
+  led_n(1) <= not pllstat;    -- "PLL ok"
+  led_n(2) <= not ((not pi_cs0_n) or (not pi_cs1_n));    -- "PI SPI"
+  led_n(3) <= '1';
+  
   pllsdi <= pi_mosi;
   pllsclk <= pi_sclk;
   pllcs_n <= not ((not pi_cs1_n) and csr_main(csr_main'high));
