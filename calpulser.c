@@ -86,9 +86,7 @@ int main(int argc, char *argv[]) {
   // Keep fVCO in range 4 - 5 GHz, and take care w/ B value, see datasheet.
   // Avoid P=x.5 and M=1, due to subharmonic (see datasheet).
   // Minimum P that fits each case is best, to allow for finest/any control of delays.
-  printf("tici=%lf, fabs(tici-0.5)=%lf\n",tici,fabs(tici-0.5));
   if (fabs(tici-0.5)<1e-6) {   // need to test    TBD whether the board can run reliably for 0.5 ns tics
-    printf("A\n");
     pll_R=10;   // range 1 to 63
     pll_N=500;  // range 2 to 511 (with RA0=1)
     pll_P=2;    // allowed values 2, 2.5, 3, 3.5, 4
@@ -97,7 +95,6 @@ int main(int argc, char *argv[]) {
     pll_MDB=3;  // for output 4 (LVDS to FPGA, not really used at the moment)
   }
   else if (fabs(tici-0.6)<1e-6) {   // this is probably the best default/suggested tic
-    printf("B\n");
     pll_R=12;   // range 1 to 63
     pll_N=500;  // range 2 to 511 (with RA0=1)
     pll_P=3;    // allowed values 2, 2.5, 3, 3.5, 4
@@ -106,7 +103,6 @@ int main(int argc, char *argv[]) {
     pll_MDB=3;  // for output 4 (LVDS to FPGA, not really used at the moment)
   }
   else if (fabs(tici-1.0)<1e-6) {   // need to test
-    printf("C\n");
     pll_R=12;   // range 1 to 63
     pll_N=300;  // range 2 to 511 (with RA0=1)
     pll_P=2;    // allowed values 2, 2.5, 3, 3.5, 4
@@ -115,7 +111,6 @@ int main(int argc, char *argv[]) {
     pll_MDB=5;  // for output 4 (LVDS to FPGA, not really used at the moment)
   }
   else if (fabs(tici-6.0)<1e-6) {  // need to test   intended for some bench tests only
-    printf("D\n");
     pll_R=12;   // range 1 to 63
     pll_N=50;   // range 2 to 511 (with RA0=1)
     pll_P=3;    // allowed values 2, 2.5, 3, 3.5, 4
@@ -136,7 +131,6 @@ int main(int argc, char *argv[]) {
   init_delay = (int) (init_delay_ns/tic + 0.5);
   pp_delay = (int) (pp_delay_ns/tic + 0.5);
   p_width = (int) (p_width_ns/tic + 0.5);
-
 
   printf("TOP pulser setup:\nNote: your selections were rounded to nearest actual values\n");
   printf("tic size %7.5lf ns\n",tic);
@@ -249,14 +243,14 @@ int main(int argc, char *argv[]) {
   tx_buf[8] = (((int)((pll_P-1.999)*2))&0x07)<<5;  // reg 8: P, no mute
   tx_buf[9] = 0x80 | pll_MDA;   // reg 8: out0: sync enable, no mute, MDA
   tx_buf[10] = 0x00;  // reg 9: SN=0 SR=0
-  tx_buf[11] = 0x80;  // reg 10: out1: sync enable, no mute, MDA
+  tx_buf[11] = 0x80 | pll_MDA;  // reg 10: out1: sync enable, no mute, MDA
   tx_buf[12] = 0x00;  // reg 11: out1: delay 0
-  tx_buf[13] = 0x80;  // reg 13: out2: sync enable, no mute, MDA
+  tx_buf[13] = 0x80 | pll_MDA;  // reg 13: out2: sync enable, no mute, MDA
   tx_buf[14] = 0x00;  // reg 14: out2: delay 0
-  tx_buf[15] = 0x80;  // reg 15: out3: sync enable, no mute, MDA
+  tx_buf[15] = 0x80 | pll_MDA;  // reg 15: out3: sync enable, no mute, MDA
   // best polarity for various clocks has to be investigated still   !!! CAUTION !!!
   tx_buf[16] = 0x40;  // reg 16: out3: delay 0, let's invert (better FF clock timing?)
-  tx_buf[17] = 0x83;  // reg 17: out4: sync enable, no mute, MDB (!!)
+  tx_buf[17] = 0x80 | pll_MDB;  // reg 17: out4: sync enable, no mute, MDB (!!)
   tx_buf[18] = 0x06;  // reg 18: out4: delay 6 (this gets it phase aligned with out0-3)  THIS IS NOT RIGHT DELAY IF MDB/=3
   // I NEED TO REALLY HANDLE THE DELAYS IN VARIOUS CLOCK SETUPS, add this, probably needed for phase details on othe clocks anyway
   spit[1].len = 19;
@@ -337,7 +331,7 @@ int main(int argc, char *argv[]) {
   // do MMCM reset bit...
   printf("doing FPGA MMCM reset...\n");
   // set device 1 to the VGA A (using device 0) & set pulse characteristics
-  tx_buf[0] = 0x48;  // and asser MMCM reset
+  tx_buf[0] = 0x48;  // and assert MMCM reset
   tx_buf[1] = 0x00;
   tx_buf[2]=init_delay>>8;
   tx_buf[3]=init_delay&0xff;

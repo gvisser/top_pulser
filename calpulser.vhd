@@ -67,13 +67,14 @@ architecture calpulser_0 of calpulser is
   signal jj: integer range 0 to 100000 := 100000;  -- hack trigger
   signal ad_pre: std_logic_vector(ad'range);
   signal csr_main: std_logic_vector(9*8-1 downto 0) := (others => '0');
+  signal mmcm_locked: std_logic;
 begin
 
   -- LED's viewed from front:  0  1  2  3
   led_n(0) <= '0';            -- "FPGA up"
   led_n(1) <= not pllstat;    -- "PLL ok"
   led_n(2) <= not ((not pi_cs0_n) or (not pi_cs1_n));    -- "PI SPI"
-  led_n(3) <= '1';
+  led_n(3) <= not mmcm_locked;
   
   pllsdi <= pi_mosi;
   pllsclk <= pi_sclk;
@@ -153,7 +154,7 @@ begin
                   DIVCLK_DIVIDE => 1, -- refclk divisor
                   STARTUP_WAIT => FALSE)
       port map(CLKIN1 => apclk_i_bufg, CLKFBIN => apclk_fb_bufg, CLKOUT0 => apclk_x,
-               PWRDWN => '0', RST => csr_main(csr_main'high-4));
+               PWRDWN => '0', RST => csr_main(csr_main'high-4), LOCKED => mmcm_locked);
     x4: ODDR port map(C => apclk, Q => apclk_fb_pad_o,
                       CE => '1', D1 => '1', D2 => '0', R => '0', S => '0');
     x5: IOBUF port map(I => apclk_fb_pad_o, T => '0', IO => apclk_fb_pad, O => apclk_fb_pad_i);
