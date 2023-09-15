@@ -34,11 +34,13 @@ entity calpulser is
     pllsdo,pllstat: in std_logic;
     asclk,asdi,acs_n: out std_logic;
     asdo: in std_logic;
+    bsclk,bsdi,bcs_n: out std_logic;
+    bsdo: in std_logic;
 
     asel,async: out std_logic;
     ad: out std_logic_vector(0 to 7);
     apclk_p,apclk_n: in std_logic;
-    apclk_fb_pad: inout std_logic;      -- not connected on PCB, used for MMCM FB
+    apclk_fb_pad: inout std_logic;      -- not connected on PCB, but used for MMCM FB
     bsel,bsync: out std_logic;
     bd: out std_logic_vector(0 to 7);
     -- bpclk_p,bpclk_n: in std_logic; -- not used, for now, use apclk for both (check w/ scope if a sane plan!)
@@ -82,11 +84,22 @@ begin
   asdi <= pi_mosi;
   asclk <= pi_sclk;
   acs_n <= not ((not pi_cs1_n) and csr_main(csr_main'high-1));
-  -- b vga on csr high-2
+  bsdi <= pi_mosi;
+  bsclk <= pi_sclk;
+  bcs_n <= not ((not pi_cs1_n) and csr_main(csr_main'high-2));
 
   -- local control registers (SPI device 0)
   -- Currently this does not support read-only, but I could easily use a bit in the written data (in
   -- shadow register) to select whether to really write the data out. Do this later, if relevant.
+  -- First byte bits:
+  --    7: select PLL chip to SPI device 1
+  --    6: select VGA A chip to SPI device 1
+  --    5: select VGA B chip to SPI device 1    do only one of them at a time!
+  --    4: sync to both MC100EP446's
+  --    3: apclk MMCM reset
+  --    2: clksel (1: local, 0: FTSW)
+  --    1:
+  --    0:
   csr_blk: block
     signal csr_main_shadow: std_logic_vector(csr_main'range);
     signal k: integer range 0 to csr_main'high+2;
@@ -117,14 +130,15 @@ begin
     end process;
     pi_miso <= csr_main_shadow(csr_main'high) when pi_cs0_n='0'
                else pllsdo when csr_main(csr_main'high)='1'
-               else asdo;
+               else asdo when csr_main(csr_main'high-1)='1'
+               else bsdo;
   end block csr_blk;
   init_delay <= to_integer(unsigned(csr_main(55 downto 40)));
   pp_delay <= to_integer(unsigned(csr_main(39 downto 24)));
   p_width <= to_integer(unsigned(csr_main(23 downto 8)));
   kpulsemax <= to_integer(unsigned(csr_main(3 downto 0)));
   
-  clksel <= '1';
+  clksel <= csr_main(csr_main'high-5);
 
   asel <= '1';
   bsel <= '1';

@@ -29,8 +29,8 @@ int main(int argc, char *argv[]) {
   int k,ret;
   double init_delay_ns=0.0,pp_delay_ns=20.0,p_width_ns=2.0;
   int init_delay,pp_delay,p_width,npulses=2,atten=32;
-  double tici=0.6,tic,fin=0.040,fout,fvco; // later fin will be set according to CLKSEL control and user input (about ext clock)
-  int pll_R,pll_N,pll_BD,pll_MDA,pll_MDB;
+  double tici=0.6,tic,fin,fout,fvco;
+  int pll_R,pll_N,pll_BD,pll_MDA,pll_MDB,clksel;
   double pll_P;
   const uint16_t MD2M[16] =  // table 15 "MDx[3:0] Programming" in LTC6851 datasheet
     {0b0000000000000001,
@@ -83,6 +83,8 @@ int main(int argc, char *argv[]) {
   // Clock setups -- add more here -- nothing below '//////' line should be specific to any setup!
   // For the moment not using delays (but maybe will need to for some clock setups).
   // For the moment, using local oscillator only, need to work in here the FTSW clock stuff.
+  clksel=1; // values are 0: FTSW 1: local osc (40 MHz)
+  fin=0.040; // later fin will be set according to CLKSEL control and user input (about ext clock)
   // Keep fVCO in range 4 - 5 GHz, and take care w/ B value, see datasheet.
   // Avoid P=x.5 and M=1, due to subharmonic (see datasheet).
   // Minimum P that fits each case is best, to allow for finest/any control of delays.
@@ -199,7 +201,8 @@ int main(int argc, char *argv[]) {
   //     13: enable SPI 1 to channel B VGA
   //     12: SYNC bit to A & B serializer chips (MC100EP446)
   //     11: APCLK MMCM reset bit
-  //     10-0 not used
+  //     10: clksel (1: local, 0: FTSW)
+  //     9-0 not used
   //         to be added: ch B VGA, A/B MC100EP446 SYNC bit, A & B polarity bits, A & B enable bits
   //to be added: 32 bits trigger timer
   // 2,3:  A init_delay 0 to 2**16-1
@@ -207,7 +210,7 @@ int main(int argc, char *argv[]) {
   // 6,7:  A p_width 0 to 2**16-1
   // 8:    A npulses-1, 0 to 2**4-1
   //-----------------------------------------------------------------------------------------------
-  tx_buf[0] = 0x90; // set device 1 to the PLL (using device 0), and assert MC100EP446 SYNC
+  tx_buf[0] = 0x90 | (clksel<<2); // set device 1 to the PLL (using device 0), and assert MC100EP446 SYNC
   tx_buf[1] = 0x00;
   tx_buf[2]=init_delay>>8;
   tx_buf[3]=init_delay&0xff;
@@ -279,7 +282,7 @@ int main(int argc, char *argv[]) {
 
   // release MC100EP446 SYNC
   printf("releasing MC100EP446 SYNC...\n");
-  tx_buf[0] = 0x80; // keep device 1 to the PLL (using device 0), and release MC100EP446 SYNC
+  tx_buf[0] = 0x80 | (clksel<<2); // keep device 1 to the PLL (using device 0), and release MC100EP446 SYNC
   tx_buf[1] = 0x00;
   tx_buf[2]=init_delay>>8;
   tx_buf[3]=init_delay&0xff;
@@ -331,7 +334,7 @@ int main(int argc, char *argv[]) {
   // do MMCM reset bit...
   printf("doing FPGA MMCM reset...\n");
   // set device 1 to the VGA A (using device 0) & set pulse characteristics
-  tx_buf[0] = 0x48;  // and assert MMCM reset
+  tx_buf[0] = 0x48 | (clksel<<2);  // and assert MMCM reset
   tx_buf[1] = 0x00;
   tx_buf[2]=init_delay>>8;
   tx_buf[3]=init_delay&0xff;
@@ -352,7 +355,7 @@ int main(int argc, char *argv[]) {
   printf("\n");
   usleep(50000);
   // set device 1 to the VGA A (using device 0) & set pulse characteristics
-  tx_buf[0] = 0x40;  // release the MMCM reset
+  tx_buf[0] = 0x40 | (clksel<<2);  // release the MMCM reset
   tx_buf[1] = 0x00;
   tx_buf[2]=init_delay>>8;
   tx_buf[3]=init_delay&0xff;
