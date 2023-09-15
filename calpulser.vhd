@@ -123,6 +123,9 @@ begin
     begin
       -- copy to register at the end of the read/write sequence
       if pi_cs0_n'event and pi_cs0_n='1' then
+        -- software will be simpler if we allow 2-byte (1-byte?) write as well as full write
+        -- currently writing all stuff even when it is only meaningless padding...   should improve
+        -- this scheme someday
         if k=csr_main'high+1 then      -- ONLY if we got EXACTLY the expected number of sclk's !!
           csr_main <= csr_main_shadow; -- if there will be some read-only bits in future, leave them out of this of course
         end if;
