@@ -128,6 +128,8 @@ begin
         -- this scheme someday
         if k=csr_main'high+1 then      -- ONLY if we got EXACTLY the expected number of sclk's !!
           csr_main <= csr_main_shadow; -- if there will be some read-only bits in future, leave them out of this of course
+        elsif k=16 then                -- OR ALTERNATIVELY if we got 16 then it's a write of just the high two bytes!
+          csr_main(csr_main'high downto csr_main'high-15) <= csr_main_shadow(15 downto 0);
         end if;
       end if;
     end process;

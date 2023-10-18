@@ -1,7 +1,7 @@
 /*  Belle-II TOP Calibration Pulser
     Gerard Visser, Indiana University
 
-SPI handling based on examples at https://github.com/sckulkarni246/ke-rpi-samples/tree/main/spi-c-ioctl
+    SPI handling based on examples at https://github.com/sckulkarni246/ke-rpi-samples/tree/main/spi-c-ioctl
 */
 
 #include <stdio.h>
@@ -26,7 +26,7 @@ int main(int argc, char *argv[]) {
   uint32_t tmp;
   uint8_t tx_buf[32];
   uint8_t rx_buf[32];
-  int k,ret;
+  int ix,k,ret;
   double init_delay_ns[2]={0.0,0.0},pp_delay_ns[2]={20.0,20.0},p_width_ns[2]={2.0,2.0};
   int ch=0,init_delay[2],pp_delay[2],p_width[2],npulses[2]={2,2},atten[2]={32,32};
   double tici=0.6,tic,fin,fout,fvco;
@@ -151,7 +151,7 @@ int main(int argc, char *argv[]) {
   printf("tic size %7.5lf ns\n",tic);
   printf("  LTC6951 will be set for fout=%7.5lf GHz, fvco=%7.5lf GHz\n",fout,fvco);
   for(ch=0;ch<2;ch++) {
-    printf("ch %d: initial delay %d tics (%.3lf ns),",ch,init_delay[ch],init_delay[ch]*tic);
+    printf("ch %d: initial delay %d tics (%.3lf ns), ",ch,init_delay[ch],init_delay[ch]*tic);
     if (npulses[ch]==1) {
       printf("1 pulse, width %d tics (%.3lf ns)\n",p_width[ch],p_width[ch]*tic);
     }
@@ -225,16 +225,9 @@ int main(int argc, char *argv[]) {
   // 6,7:  A p_width 0 to 2**16-1
   // 8:    A npulses-1, 0 to 2**4-1
   //-----------------------------------------------------------------------------------------------
-  tx_buf[0] = 0x90 | (clksel<<2); // set device 1 to the PLL (using device 0), and assert MC100EP446 SYNC
-  tx_buf[1] = 0x00;
-  tx_buf[2]=init_delay[0]>>8;
-  tx_buf[3]=init_delay[0]&0xff;
-  tx_buf[4]=pp_delay[0]>>8;
-  tx_buf[5]=pp_delay[0]&0xff;
-  tx_buf[6]=p_width[0]>>8;
-  tx_buf[7]=p_width[0]&0xff;
-  tx_buf[8]=npulses[0]-1;
-  spit[0].len = 9;
+  tx_buf[ix=0] = 0x90 | (clksel<<2); // set device 1 to the PLL (using device 0), and assert MC100EP446 SYNC
+  tx_buf[++ix] = 0x00;
+  spit[0].len = ++ix;
   ret = ioctl(spifd[0], SPI_IOC_MESSAGE(1), &spit[0]);
   if(ret<0) {
     perror("[0] SPI transfer ioctl ERROR");
@@ -250,28 +243,28 @@ int main(int argc, char *argv[]) {
   // it would probably be best to check bounds on pll_R, pll_N, pll_P, pll_MDA, pll_MDB here... Add this someday
   // while at that, can check VCO frequency restriction automatically here too...
 
-  tx_buf[0] = 0x01*2+0;  // start write at register 0x01
-  tx_buf[1] = 0xba;   // reg 1: STAT = not (ALCHI or ALCLO or (not LOCK) or (not REFOK)) = "PLLOK"
-  tx_buf[2] = 0x04;   // reg 2: SYNC asserted; nothing powered down; for cal we use autocal so don't set it here
-  tx_buf[3] = 0x7e;   // reg 3: ALC: during cal only, monitor level always, autocal enabled, RA0=1, low level ref input
-  tx_buf[4] = (pll_BD<<4) | 0x07;                  // reg 4: BD, LKWIN 10.7ns, LKCNT 2048
-  tx_buf[5] = (pll_R<<2) | ((pll_N&0x300)>>8);     // reg 5: R and top 2 bits of N
-  tx_buf[6] = (pll_N&0xff);                        // reg 6: bottom byte of N
-  tx_buf[7] = 0x05;   // reg 7: CP: no overrides, not WIDE, 5.6 mA
-  tx_buf[8] = (((int)((pll_P-1.999)*2))&0x07)<<5;  // reg 8: P, no mute
-  tx_buf[9] = 0x80 | pll_MDA;   // reg 8: out0: sync enable, no mute, MDA
-  tx_buf[10] = 0x00;  // reg 9: SN=0 SR=0
-  tx_buf[11] = 0x80 | pll_MDA;  // reg 10: out1: sync enable, no mute, MDA
-  tx_buf[12] = 0x00;  // reg 11: out1: delay 0
-  tx_buf[13] = 0x80 | pll_MDA;  // reg 13: out2: sync enable, no mute, MDA
-  tx_buf[14] = 0x00;  // reg 14: out2: delay 0
-  tx_buf[15] = 0x80 | pll_MDA;  // reg 15: out3: sync enable, no mute, MDA
+  tx_buf[ix=0] = 0x01*2+0;  // start write at register 0x01
+  tx_buf[++ix] = 0xba;   // reg 1: STAT = not (ALCHI or ALCLO or (not LOCK) or (not REFOK)) = "PLLOK"
+  tx_buf[++ix] = 0x04;   // reg 2: SYNC asserted; nothing powered down; for cal we use autocal so don't set it here
+  tx_buf[++ix] = 0x7e;   // reg 3: ALC: during cal only, monitor level always, autocal enabled, RA0=1, low level ref input
+  tx_buf[++ix] = (pll_BD<<4) | 0x07;                  // reg 4: BD, LKWIN 10.7ns, LKCNT 2048
+  tx_buf[++ix] = (pll_R<<2) | ((pll_N&0x300)>>8);     // reg 5: R and top 2 bits of N
+  tx_buf[++ix] = (pll_N&0xff);                        // reg 6: bottom byte of N
+  tx_buf[++ix] = 0x05;   // reg 7: CP: no overrides, not WIDE, 5.6 mA
+  tx_buf[++ix] = (((int)((pll_P-1.999)*2))&0x07)<<5;  // reg 8: P, no mute
+  tx_buf[++ix] = 0x80 | pll_MDA;   // reg 8: out0: sync enable, no mute, MDA
+  tx_buf[++ix] = 0x00;  // reg 9: SN=0 SR=0
+  tx_buf[++ix] = 0x80 | pll_MDA;  // reg 10: out1: sync enable, no mute, MDA
+  tx_buf[++ix] = 0x00;  // reg 11: out1: delay 0
+  tx_buf[++ix] = 0x80 | pll_MDA;  // reg 13: out2: sync enable, no mute, MDA
+  tx_buf[++ix] = 0x00;  // reg 14: out2: delay 0
+  tx_buf[++ix] = 0x80 | pll_MDA;  // reg 15: out3: sync enable, no mute, MDA
   // best polarity for various clocks has to be investigated still   !!! CAUTION !!!
-  tx_buf[16] = 0x40;  // reg 16: out3: delay 0, let's invert (better FF clock timing?)
-  tx_buf[17] = 0x80 | pll_MDB;  // reg 17: out4: sync enable, no mute, MDB (!!)
-  tx_buf[18] = 0x06;  // reg 18: out4: delay 6 (this gets it phase aligned with out0-3)  THIS IS NOT RIGHT DELAY IF MDB/=3
+  tx_buf[++ix] = 0x40;  // reg 16: out3: delay 0, let's invert (better FF clock timing?)
+  tx_buf[++ix] = 0x80 | pll_MDB;  // reg 17: out4: sync enable, no mute, MDB (!!)
+  tx_buf[++ix] = 0x06;  // reg 18: out4: delay 6 (this gets it phase aligned with out0-3)  THIS IS NOT RIGHT DELAY IF MDB/=3
   // I NEED TO REALLY HANDLE THE DELAYS IN VARIOUS CLOCK SETUPS, add this, probably needed for phase details on othe clocks anyway
-  spit[1].len = 19;
+  spit[1].len = ++ix;
   ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
   if(ret<0) {
     perror("[1] SPI transfer ioctl ERROR");
@@ -297,16 +290,9 @@ int main(int argc, char *argv[]) {
 
   // release MC100EP446 SYNC
   printf("releasing MC100EP446 SYNC...\n");
-  tx_buf[0] = 0x80 | (clksel<<2); // keep device 1 to the PLL (using device 0), and release MC100EP446 SYNC
-  tx_buf[1] = 0x00;
-  tx_buf[2]=init_delay[0]>>8;
-  tx_buf[3]=init_delay[0]&0xff;
-  tx_buf[4]=pp_delay[0]>>8;
-  tx_buf[5]=pp_delay[0]&0xff;
-  tx_buf[6]=p_width[0]>>8;
-  tx_buf[7]=p_width[0]&0xff;
-  tx_buf[8]=npulses[0]-1;
-  spit[0].len = 9;
+  tx_buf[ix=0] = 0x80 | (clksel<<2); // keep device 1 to the PLL (using device 0), and release MC100EP446 SYNC
+  tx_buf[++ix] = 0x00;
+  spit[0].len = ++ix;
   ret = ioctl(spifd[0], SPI_IOC_MESSAGE(1), &spit[0]);
   if(ret<0) {
     perror("[0] SPI transfer ioctl ERROR");
@@ -320,9 +306,9 @@ int main(int argc, char *argv[]) {
 
   // release LTC6951 SYNC
   printf("releasing LTC6951 SYNC...\n");
-  tx_buf[0] = 0x02*2+0;  // start write at register 0x02
-  tx_buf[1] = 0x00;  // reg 2: SYNC deasserted; nothing powered down; for cal we use autocal so don't set it here
-  spit[1].len = 2;
+  tx_buf[ix=0] = 0x02*2+0;  // start write at register 0x02
+  tx_buf[++ix] = 0x00;  // reg 2: SYNC deasserted; nothing powered down; for cal we use autocal so don't set it here
+  spit[1].len = ++ix;
   ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
   if(ret<0) {
     perror("[1] SPI transfer ioctl ERROR");
@@ -349,16 +335,9 @@ int main(int argc, char *argv[]) {
   // do MMCM reset bit...
   printf("doing FPGA MMCM reset...\n");
   // set device 1 to the VGA A (using device 0) & set pulse characteristics
-  tx_buf[0] = 0x48 | (clksel<<2);  // and assert MMCM reset
-  tx_buf[1] = 0x00;
-  tx_buf[2]=init_delay[0]>>8;
-  tx_buf[3]=init_delay[0]&0xff;
-  tx_buf[4]=pp_delay[0]>>8;
-  tx_buf[5]=pp_delay[0]&0xff;
-  tx_buf[6]=p_width[0]>>8;
-  tx_buf[7]=p_width[0]&0xff;
-  tx_buf[8]=npulses[0]-1;
-  spit[0].len = 9;
+  tx_buf[ix=0] = 0x48 | (clksel<<2);  // and assert MMCM reset
+  tx_buf[++ix] = 0x00;
+  spit[0].len = ++ix;
   ret = ioctl(spifd[0], SPI_IOC_MESSAGE(1), &spit[0]);
   if(ret<0) {
     perror("[0] SPI transfer ioctl ERROR");
@@ -370,16 +349,9 @@ int main(int argc, char *argv[]) {
   printf("\n");
   usleep(50000);
   // set device 1 to the VGA A (using device 0) & set pulse characteristics
-  tx_buf[0] = 0x40 | (clksel<<2);  // release the MMCM reset
-  tx_buf[1] = 0x00;
-  tx_buf[2]=init_delay[0]>>8;
-  tx_buf[3]=init_delay[0]&0xff;
-  tx_buf[4]=pp_delay[0]>>8;
-  tx_buf[5]=pp_delay[0]&0xff;
-  tx_buf[6]=p_width[0]>>8;
-  tx_buf[7]=p_width[0]&0xff;
-  tx_buf[8]=npulses[0]-1;
-  spit[0].len = 9;
+  tx_buf[ix=0] = 0x40 | (clksel<<2);  // release the MMCM reset
+  tx_buf[++ix] = 0x00;
+  spit[0].len = ++ix;
   ret = ioctl(spifd[0], SPI_IOC_MESSAGE(1), &spit[0]);
   if(ret<0) {
     perror("[0] SPI transfer ioctl ERROR");
@@ -393,9 +365,9 @@ int main(int argc, char *argv[]) {
   // clocks are all stable (one hopes) and we are addressed to VGA A, proceed with that
 
   // set gain
-  tx_buf[0] = 0x02;
-  tx_buf[1] = atten[0]&0x3f;
-  spit[1].len=2;
+  tx_buf[ix=0] = 0x02;
+  tx_buf[++ix] = atten[0]&0x3f;
+  spit[1].len = ++ix;
   ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
   if(ret<0) {
     perror("[1] SPI transfer ioctl ERROR");
@@ -421,16 +393,16 @@ int main(int argc, char *argv[]) {
   
   usleep(50000);
   // set device 1 to the VGA B (using device 0) & set pulse characteristics
-  tx_buf[0] = 0x20 | (clksel<<2);
-  tx_buf[1] = 0x00;
-  tx_buf[2]=init_delay[0]>>8;
-  tx_buf[3]=init_delay[0]&0xff;
-  tx_buf[4]=pp_delay[0]>>8;
-  tx_buf[5]=pp_delay[0]&0xff;
-  tx_buf[6]=p_width[0]>>8;
-  tx_buf[7]=p_width[0]&0xff;
-  tx_buf[8]=npulses[0]-1;
-  spit[0].len = 9;
+  tx_buf[ix=0] = 0x20 | (clksel<<2);
+  tx_buf[++ix] = 0x00;
+  tx_buf[++ix]=init_delay[0]>>8;
+  tx_buf[++ix]=init_delay[0]&0xff;
+  tx_buf[++ix]=pp_delay[0]>>8;
+  tx_buf[++ix]=pp_delay[0]&0xff;
+  tx_buf[++ix]=p_width[0]>>8;
+  tx_buf[++ix]=p_width[0]&0xff;
+  tx_buf[++ix]=npulses[0]-1;
+  spit[0].len = ++ix;
   ret = ioctl(spifd[0], SPI_IOC_MESSAGE(1), &spit[0]);
   if(ret<0) {
     perror("[0] SPI transfer ioctl ERROR");
@@ -443,9 +415,9 @@ int main(int argc, char *argv[]) {
   usleep(50000);
 
   // set gain
-  tx_buf[0] = 0x02;
-  tx_buf[1] = atten[1]&0x3f;
-  spit[1].len=2;
+  tx_buf[ix=0] = 0x02;
+  tx_buf[++ix] = atten[1]&0x3f;
+  spit[1].len = ++ix;
   ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
   if(ret<0) {
     perror("[1] SPI transfer ioctl ERROR");

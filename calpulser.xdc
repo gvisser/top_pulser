@@ -48,7 +48,7 @@ set_property PACKAGE_PIN N20 [get_ports {led_n[0]}]
 set_property PACKAGE_PIN N19 [get_ports {led_n[1]}]
 set_property PACKAGE_PIN N18 [get_ports {led_n[2]}]
 set_property PACKAGE_PIN N17 [get_ports {led_n[3]}]
-
+set_property DRIVE 16 [get_ports {led_n[*]}]
 
 set_property IOSTANDARD LVCMOS33 [get_ports {*}]
 # do I have to exclude that from the LVCMOS33 line? how?
