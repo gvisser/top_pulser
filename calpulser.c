@@ -28,7 +28,7 @@ int main(int argc, char *argv[]) {
   uint8_t rx_buf[32];
   int ix,k,ret;
   double init_delay_ns[2]={0.0,0.0},pp_delay_ns[2]={20.0,20.0},p_width_ns[2]={2.0,2.0};
-  int ch=0,init_delay[2],pp_delay[2],p_width[2],npulses[2]={2,2},pol[2]={0,0},atten[2]={32,32};
+  int ext=0,ch=0,init_delay[2],pp_delay[2],p_width[2],npulses[2]={2,2},pol[2]={0,0},atten[2]={32,32};
   double tici=0.6,tic,fin,fout,fvco;
   int pll_R,pll_N,pll_BD,pll_MDA,pll_MDB,clksel;
   double pll_P;
@@ -50,10 +50,13 @@ int main(int argc, char *argv[]) {
      0b0000000110000000,
      0b0000001000000000};
 
-  while((c = getopt(argc, argv, "t:c:i:s:w:n:va:")) != -1) {
+  while((c = getopt(argc, argv, "t:ec:i:s:w:n:va:")) != -1) {
     switch(c) {
     case 't' :  // time tic in ns (1ns or 600ps, maybe 750, 800 added later))
       tici=atof(optarg);
+      break;
+    case 'e' :  // use external (AUXI1) trigger instead of internal timer trigger
+      ext=1;
       break;
     case 'c' :  // set channel index for arguments that follow
       ch=atoi(optarg);
@@ -89,8 +92,9 @@ int main(int argc, char *argv[]) {
 	atten[ch]=32;
       break;
     default :
-      printf("invalid argument\n");
-      break;
+      printf("invalid argument\n"
+	     "BTW - look at the getopt cases in calpulser.c for 'documentation' how to use, thank you\n");
+      return -1;
     }
   }
 
@@ -151,7 +155,7 @@ int main(int argc, char *argv[]) {
   }
 
   printf("TOP pulser setup:\nNote: your selections were rounded to nearest actual values\n");
-  printf("tic size %7.5lf ns\n",tic);
+  printf("tic size %7.5lf ns, trigger %s\n",tic,(ext?"external":"internal"));
   printf("  LTC6951 will be set for fout=%7.5lf GHz, fvco=%7.5lf GHz\n",fout,fvco);
   for(ch=0;ch<2;ch++) {
     printf("ch %d: initial delay %d tics (%.3lf ns), ",ch,init_delay[ch],init_delay[ch]*tic);
@@ -174,16 +178,16 @@ int main(int argc, char *argv[]) {
   ////////////////////////////////////////////////////////////////////////////////////
   
   memset(&spit,0,sizeof(spit));  // there are other fields, which should all be 0 !!
-  spit[0].tx_buf = /*(unsigned long)*/(uint32_t) tx_buf;
-  spit[0].rx_buf = (unsigned long) rx_buf;
+  spit[0].tx_buf = (uint32_t) tx_buf;
+  spit[0].rx_buf = (uint32_t) rx_buf;
   //spit.bits_per_word = 0;
   spit[0].speed_hz = 200000; // MHz, and seems to have good resolution at least for around few MHz
   // HUH? did I really mean 200 MHZz??? Seems unlikely, should this have been 20?????
   //spit.delay_usecs = 0;
-  //    BELOW spit.len = 2;
-  spit[1].tx_buf = /*(unsigned long)*/(uint32_t) tx_buf;  // we just use same buffer, for convenience
-  spit[1].rx_buf = (unsigned long) rx_buf;                // ditto
-  spit[1].speed_hz = 200000; // MHz, and seems to have good resolution at least for around few MHz
+  //  (spit.len is filled in for each transfer, below)
+  spit[1].tx_buf = (uint32_t) tx_buf;   // we just use same buffer, for convenience
+  spit[1].rx_buf = (uint32_t) rx_buf;   // ditto
+  spit[1].speed_hz = 200000;
 
   // clean this up w/ for loop, perror
   spifd[0] = open("/dev/spidev0.0", O_RDWR);
@@ -220,15 +224,16 @@ int main(int argc, char *argv[]) {
   //     12: SYNC bit to A & B serializer chips (MC100EP446)
   //     11: APCLK MMCM reset bit
   //     10: clksel (1: local, 0: FTSW)
-  //     9-0 not used
-  //         to be added: ch B VGA, A/B MC100EP446 SYNC bit, A & B polarity bits, A & B enable bits
+  //      9: trigsel (: external AUXIN0, 0: internal timer)
+  //     8-0 not used
   //to be added: 32 bits trigger timer
   // 2,3:  A init_delay 0 to 2**16-1
   // 4,5:  A pp_delay 0 to 2**16-1
   // 6,7:  A p_width 0 to 2**16-1
   // 8:    A npulses-1, 0 to 2**4-1, polarity
+  // 9-15: B pattern controls, correspondingly
   //-----------------------------------------------------------------------------------------------
-  tx_buf[ix=0] = 0x90 | (clksel<<2); // set device 1 to the PLL (using device 0), and assert MC100EP446 SYNC
+  tx_buf[ix=0] = 0x90 | (clksel<<2) | (ext<<1); // set device 1 to the PLL (using device 0), and assert MC100EP446 SYNC
   tx_buf[++ix] = 0x00;
   spit[0].len = ++ix;
   ret = ioctl(spifd[0], SPI_IOC_MESSAGE(1), &spit[0]);
@@ -293,7 +298,7 @@ int main(int argc, char *argv[]) {
 
   // release MC100EP446 SYNC
   printf("releasing MC100EP446 SYNC...\n");
-  tx_buf[ix=0] = 0x80 | (clksel<<2); // keep device 1 to the PLL (using device 0), and release MC100EP446 SYNC
+  tx_buf[ix=0] = 0x80 | (clksel<<2) | (ext<<1); // keep device 1 to the PLL (using device 0), and release MC100EP446 SYNC
   tx_buf[++ix] = 0x00;
   spit[0].len = ++ix;
   ret = ioctl(spifd[0], SPI_IOC_MESSAGE(1), &spit[0]);
@@ -338,7 +343,7 @@ int main(int argc, char *argv[]) {
   // do MMCM reset bit...
   printf("doing FPGA MMCM reset...\n");
   // set device 1 to the VGA A (using device 0) & set pulse characteristics
-  tx_buf[ix=0] = 0x48 | (clksel<<2);  // and assert MMCM reset
+  tx_buf[ix=0] = 0x48 | (clksel<<2) | (ext<<1);  // and assert MMCM reset
   tx_buf[++ix] = 0x00;
   spit[0].len = ++ix;
   ret = ioctl(spifd[0], SPI_IOC_MESSAGE(1), &spit[0]);
@@ -396,7 +401,7 @@ int main(int argc, char *argv[]) {
   
   usleep(50000);
   // set device 1 to the VGA B (using device 0) & set pulse characteristics
-  tx_buf[ix=0] = 0x20 | (clksel<<2);
+  tx_buf[ix=0] = 0x20 | (clksel<<2) | (ext<<1);
   tx_buf[++ix] = 0x00;
   for(ch=0;ch<2;ch++) {
     tx_buf[++ix]=init_delay[ch]>>8;

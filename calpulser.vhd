@@ -46,7 +46,8 @@ entity calpulser is
     -- bpclk_p,bpclk_n: in std_logic; -- not used, for now, use apclk for both (check w/ scope if a sane plan!)
 
     led_n: out std_logic_vector(3 downto 0);
-    auxo0_n,auxo1: out std_logic
+    auxo0_n,auxo1: out std_logic;
+    auxi0: in std_logic
     );
 end calpulser;
 
@@ -62,8 +63,7 @@ architecture calpulser_0 of calpulser is
   signal kpulsemax: array_int_4(0 to 1);   -- num_pulses - 1
   signal polinv: std_logic_vector(0 to 1);
   signal idle: std_logic_vector(0 to 1) := "11";
-  signal jj: integer range 0 to 100000 := 100000;  -- hack trigger
-  signal go: std_logic;
+  signal trigsel,go: std_logic;
   -- 2 byte super-csr + 7 byte channel-pattern csr per channel
   signal csr_main: std_logic_vector((2+2*7)*8-1 downto 0) := (others => '0');
   signal mmcm_locked: std_logic;
@@ -95,7 +95,7 @@ begin
   --    4: sync to both MC100EP446's
   --    3: apclk MMCM reset
   --    2: clksel (1: local, 0: FTSW)
-  --    1:
+  --    1: trgsel (1: external AUXIN0, 0: internal timer)
   --    0:
   csr_blk: block
     signal csr_main_shadow: std_logic_vector(csr_main'range);
@@ -141,6 +141,7 @@ begin
   end generate;
   
   clksel <= csr_main(csr_main'high-5);
+  trigsel <= csr_main(csr_main'high-6);
 
   asel <= '1';
   bsel <= '1';
@@ -177,22 +178,30 @@ begin
   end block b1;
   
   ---------------------------------------------------------------------------------------------------
+  trig: block
+    signal jj: integer range 0 to 99999 := 99999;  -- internal trigger
+    signal ext_r,ext_r2,ext_r3: std_logic;
+  begin
+    process(apclk)
+    begin
+      if apclk'event and apclk='1' then
+        if jj=0 then
+          jj <= 99999;       -- internal trigger interval fixed at 100k tics for now
+        else
+          jj <= jj-1;
+        end if;
+        auxo0_n <= not go;   -- sync out on LEMO conn
+        auxo1 <= go;         -- sync out LVDS on RJ45
+        ext_r <= auxi0; ext_r2 <= ext_r; ext_r3 <= ext_r2;
+      end if;
+    end process;
+    go <= ((bool2std(jj=0) and not trigsel) or (ext_r2 and (not ext_r3) and trigsel)) 
+          and idle(0) and idle(1);
+  end block;
+
   -- Compute pulse pattern data as we go; currently supports N equal width equal spaced pulses
   -- starting after an initial delay. It would be possible to play a pattern from memory instead of
   -- computing like this. Maybe implement that option some other day.
-  process(apclk)
-  begin
-    if apclk'event and apclk='1' then
-      if jj=0 then
-        jj <= 100000;
-      else
-        jj <= jj-1;
-      end if;
-      auxo0_n <= not go;      -- sync out on LEMO conn
-      auxo1 <= go;        -- sync out LVDS on RJ45
-    end if;
-  end process;
-  go <= bool2std(jj=0) and idle(0) and idle(1);  -- later: select trigger from auxin0 or the timer
   c2: for i in 0 to 1 generate
     pat: block
       signal kpulse: integer range 0 to 2**4-1;

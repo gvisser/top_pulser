@@ -45,6 +45,7 @@ set_property PACKAGE_PIN D21 [get_ports {bd[7]}]
 set_property SLEW FAST [get_ports {bd[*]}]
 set_property PACKAGE_PIN P6 [get_ports auxo0_n]
 set_property PACKAGE_PIN V20 [get_ports auxo1]
+set_property PACKAGE_PIN M5 [get_ports auxi0]
 set_property PACKAGE_PIN N20 [get_ports {led_n[0]}]
 set_property PACKAGE_PIN N19 [get_ports {led_n[1]}]
 set_property PACKAGE_PIN N18 [get_ports {led_n[2]}]
@@ -73,8 +74,9 @@ set_false_path -from [get_clocks pi_cs0_n] -to [get_clocks apclk_x]; # apclk_x i
 # can't this be "auto" ???
 set_property IOB TRUE [get_cells {c2[0].pat.ad_reg[*]}]
 set_property IOB TRUE [get_cells {c2[1].pat.bd_reg[*]}]
-set_property IOB TRUE [get_cells auxo0_n_reg]
-set_property IOB TRUE [get_cells auxo1_reg]
+set_property IOB TRUE [get_cells trig.auxo0_n_reg]
+set_property IOB TRUE [get_cells trig.auxo1_reg]
+set_property IOB TRUE [get_cells trig.ext_r_reg]
 # I should add some output constraint here... Maybe that automatically gets me IOFF???
 # BTW this seems OK for 125 MHz PCLK but not for 250. Will need to run PCLK input through DCM to get rid of some delay... Later
 
