@@ -398,13 +398,15 @@ int main(int argc, char *argv[]) {
   // set device 1 to the VGA B (using device 0) & set pulse characteristics
   tx_buf[ix=0] = 0x20 | (clksel<<2);
   tx_buf[++ix] = 0x00;
-  tx_buf[++ix]=init_delay[0]>>8;
-  tx_buf[++ix]=init_delay[0]&0xff;
-  tx_buf[++ix]=pp_delay[0]>>8;
-  tx_buf[++ix]=pp_delay[0]&0xff;
-  tx_buf[++ix]=p_width[0]>>8;
-  tx_buf[++ix]=p_width[0]&0xff;
-  tx_buf[++ix]=(npulses[0]-1)|(pol[0]<<7);
+  for(ch=0;ch<2;ch++) {
+    tx_buf[++ix]=init_delay[ch]>>8;
+    tx_buf[++ix]=init_delay[ch]&0xff;
+    tx_buf[++ix]=pp_delay[ch]>>8;
+    tx_buf[++ix]=pp_delay[ch]&0xff;
+    tx_buf[++ix]=p_width[ch]>>8;
+    tx_buf[++ix]=p_width[ch]&0xff;
+    tx_buf[++ix]=(npulses[ch]-1)|(pol[ch]<<7);
+  }
   spit[0].len = ++ix;
   ret = ioctl(spifd[0], SPI_IOC_MESSAGE(1), &spit[0]);
   if(ret<0) {

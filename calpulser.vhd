@@ -51,11 +51,6 @@ entity calpulser is
 end calpulser;
 
 architecture calpulser_0 of calpulser is
-  -- this stuff is TEMPORARILY needed to duplicate the output data from A onto B
-  signal ad_int,bd_int: std_logic_vector(ad'range);
-  attribute KEEP: string;
-  attribute KEEP of ad_int,bd_int: signal is "true";
-  -- end of that
   attribute PULLTYPE: string;
   attribute PULLTYPE of pllsdo,asdo: signal is "PULLDOWN";
   signal apclk: std_logic;
@@ -66,10 +61,11 @@ architecture calpulser_0 of calpulser is
   signal p_width: array_int_16(0 to 1);
   signal kpulsemax: array_int_4(0 to 1);   -- num_pulses - 1
   signal polinv: std_logic_vector(0 to 1);
-  signal idle: std_logic := '1';
+  signal idle: std_logic_vector(0 to 1) := "11";
   signal jj: integer range 0 to 100000 := 100000;  -- hack trigger
   signal go: std_logic;
-  signal csr_main: std_logic_vector(9*8-1 downto 0) := (others => '0');
+  -- 2 byte super-csr + 7 byte channel-pattern csr per channel
+  signal csr_main: std_logic_vector((2+2*7)*8-1 downto 0) := (others => '0');
   signal mmcm_locked: std_logic;
 begin
 
@@ -136,11 +132,13 @@ begin
                else asdo when csr_main(csr_main'high-1)='1'
                else bsdo;
   end block csr_blk;
-  init_delay(0) <= to_integer(unsigned(csr_main(55 downto 40)));
-  pp_delay(0) <= to_integer(unsigned(csr_main(39 downto 24)));
-  p_width(0) <= to_integer(unsigned(csr_main(23 downto 8)));
-  kpulsemax(0) <= to_integer(unsigned(csr_main(3 downto 0)));
-  polinv(0) <= csr_main(7);
+  c1: for i in 1 downto 0 generate -- note, order in writing in SW is ch0 stuff first then ch1 stuff
+    init_delay(1-i) <= to_integer(unsigned(csr_main(55+56*i downto 40+56*i)));
+    pp_delay(1-i) <= to_integer(unsigned(csr_main(39+56*i downto 24+56*i)));
+    p_width(1-i) <= to_integer(unsigned(csr_main(23+56*i downto 8+56*i)));
+    kpulsemax(1-i) <= to_integer(unsigned(csr_main(3+56*i downto 56*i)));
+    polinv(1-i) <= csr_main(7+56*i);
+  end generate;
   
   clksel <= csr_main(csr_main'high-5);
 
@@ -194,55 +192,54 @@ begin
       auxo1 <= go;        -- sync out LVDS on RJ45
     end if;
   end process;
-  go <= bool2std(jj=0) and idle;  -- later: select trigger from auxin0 or the timer
-  pat1: block
-    signal kpulse: integer range 0 to 2**4-1;
-    signal k,pstart,pfinish: integer range 0 to ((2**4)+2)*(2**16-1);
-    signal d_pre: std_logic_vector(ad'range);
-  begin
-    process(apclk)
+  go <= bool2std(jj=0) and idle(0) and idle(1);  -- later: select trigger from auxin0 or the timer
+  c2: for i in 0 to 1 generate
+    pat: block
+      signal kpulse: integer range 0 to 2**4-1;
+      signal k,pstart,pfinish: integer range 0 to ((2**4)+2)*(2**16-1);
+      signal d_pre: std_logic_vector(ad'range);
     begin
-      if apclk'event and apclk='1' then -- rising edge here corresponds to falling edge out of MC100EP446
-        if idle='1' then
-          d_pre <= (others => polinv(0));
-          if go='1' then
-            idle <= '0';
-            k <= 0;
-            kpulse <= 0;
-            -- if it really still doesn't meet timing, try 8 different pstart/finish (ie.
-            -- std_logic_vector of them) so that we absorb the k+j and k+7 below. all we have to do is
-            -- offset the initial values, which anyway are "static" calculations and not really to
-            -- cover by apclk timing constraint. (check if they are, if they are trouble.)
-            pstart <= init_delay(0);         -- time (pattern tics) to start a pulse (first 1 of pulse)
-            pfinish <= init_delay(0)+p_width(0);  -- time to finish a pulse (first 0 after pulse)
-          end if;
-        else
-          k <= k+8;
-          -- for now, must have pp_delay>=p_width+8, so we handle one pulse at a time in this !!
-          -- the issue is that switching to next pulse takes a whole cycle (8 tics of pattern clock)!
-          for j in 0 to 7 loop
-            d_pre(j) <= bool2std(k+j>=pstart and k+j<pfinish) xor polinv(0);
-          end loop;
-          if k+7>=pfinish then  -- finished a pulse on this cycle? then kpulse++ and update pstart/finish
-            if kpulse=kpulsemax(0) then
-              idle <= '1';
-            else
-              kpulse <= kpulse+1;
-              pstart <= pstart+pp_delay(0);
-              pfinish <= pfinish+pp_delay(0);
+      process(apclk)
+      begin
+        if apclk'event and apclk='1' then -- rising edge here corresponds to falling edge out of MC100EP446
+          if idle(i)='1' then
+            d_pre <= (others => polinv(i));
+            if go='1' then
+              idle(i) <= '0';
+              k <= 0;
+              kpulse <= 0;
+              -- if it really still doesn't meet timing, try 8 different pstart/finish (ie.
+              -- std_logic_vector of them) so that we absorb the k+j and k+7 below. all we have to do is
+              -- offset the initial values, which anyway are "static" calculations and not really to
+              -- cover by apclk timing constraint. (check if they are, if they are trouble.)
+              pstart <= init_delay(i);         -- time (pattern tics) to start a pulse (first 1 of pulse)
+              pfinish <= init_delay(i)+p_width(i);  -- time to finish a pulse (first 0 after pulse)
+            end if;
+          else
+            k <= k+8;
+            -- for now, must have pp_delay>=p_width+8, so we handle one pulse at a time in this !!
+            -- the issue is that switching to next pulse takes a whole cycle (8 tics of pattern clock)!
+            for j in 0 to 7 loop
+              d_pre(j) <= bool2std(k+j>=pstart and k+j<pfinish) xor polinv(i);
+            end loop;
+            if k+7>=pfinish then  -- finished a pulse on this cycle? then kpulse++ and update pstart/finish
+              if kpulse=kpulsemax(i) then
+                idle(i) <= '1';
+              else
+                kpulse <= kpulse+1;
+                pstart <= pstart+pp_delay(i);
+                pfinish <= pfinish+pp_delay(i);
+              end if;
             end if;
           end if;
+          if i=0 then
+            ad <= d_pre; -- extra pipeline stage here harmless, and might help timing
+          else
+            bd <= d_pre;
+          end if;
         end if;
-        -- ad <= ad_pre;   put this back; had to make explicit ad_int bd_int so as not to optimize
-        -- away the registers for this test
-        -- also in xdc file, "_d_int_reg" --> _d_reg again...
-        ad_int <= d_pre; -- extra pipeline stage here harmless, and might help timing
-        bd_int <= d_pre; -- testing hack just use A data for first try
-      end if;
-    end process;
-  end block;
-
-  ad <= ad_int;
-  bd <= bd_int;
+      end process;
+    end block;
+  end generate;
 
 end calpulser_0;

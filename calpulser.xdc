@@ -71,8 +71,8 @@ create_clock -period 500.0 [get_ports pi_cs0_n]
 set_false_path -from [get_clocks pi_cs0_n] -to [get_clocks apclk_x]; # apclk_x is name of derived clk out of MMCM
 
 # can't this be "auto" ???
-set_property IOB TRUE [get_cells {pat1.ad_int_reg[*]}]
-set_property IOB TRUE [get_cells {pat1.bd_int_reg[*]}]
+set_property IOB TRUE [get_cells {c2[0].pat.ad_reg[*]}]
+set_property IOB TRUE [get_cells {c2[1].pat.bd_reg[*]}]
 set_property IOB TRUE [get_cells auxo0_n_reg]
 set_property IOB TRUE [get_cells auxo1_reg]
 # I should add some output constraint here... Maybe that automatically gets me IOFF???
