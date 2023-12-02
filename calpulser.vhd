@@ -46,12 +46,12 @@ entity calpulser is
     -- bpclk_p,bpclk_n: in std_logic; -- not used, for now, use apclk for both (check w/ scope if a sane plan!)
 
     led_n: out std_logic_vector(3 downto 0);
-    auxo0_n: out std_logic
+    auxo0_n,auxo1: out std_logic
     );
 end calpulser;
 
 architecture calpulser_0 of calpulser is
-  -- this stuff is temporarily needed to duplicate the output data from A onto B
+  -- this stuff is TEMPORARILY needed to duplicate the output data from A onto B
   signal ad_int,bd_int: std_logic_vector(ad'range);
   attribute KEEP: string;
   attribute KEEP of ad_int,bd_int: signal is "true";
@@ -59,15 +59,16 @@ architecture calpulser_0 of calpulser is
   attribute PULLTYPE: string;
   attribute PULLTYPE of pllsdo,asdo: signal is "PULLDOWN";
   signal apclk: std_logic;
-  signal init_delay: integer range 0 to 2**16-1;-- := 1;
-  signal pp_delay: integer range 0 to 2**16-1;-- := 20;  -- for now, pp_delay+p_width MUST be >8 !!
-  signal p_width: integer range 0 to 2**16-1;-- := 9;
-  signal kpulsemax: integer range 0 to 2**4-1;-- := 5;  -- num_pulses - 1
-  signal kpulse: integer range 0 to 2**4-1;
-  signal k,pstart,pfinish: integer range 0 to ((2**4)+2)*(2**16-1);
+  type array_int_16 is array(natural range <>) of integer range 0 to 2**16-1;
+  type array_int_4 is array(natural range <>) of integer range 0 to 2**4-1;
+  signal init_delay: array_int_16(0 to 1);
+  signal pp_delay: array_int_16(0 to 1);   -- for now, pp_delay+p_width MUST be >8 !!
+  signal p_width: array_int_16(0 to 1);
+  signal kpulsemax: array_int_4(0 to 1);   -- num_pulses - 1
+  signal polinv: std_logic_vector(0 to 1);
   signal idle: std_logic := '1';
   signal jj: integer range 0 to 100000 := 100000;  -- hack trigger
-  signal ad_pre: std_logic_vector(ad'range);
+  signal go: std_logic;
   signal csr_main: std_logic_vector(9*8-1 downto 0) := (others => '0');
   signal mmcm_locked: std_logic;
 begin
@@ -123,9 +124,6 @@ begin
     begin
       -- copy to register at the end of the read/write sequence
       if pi_cs0_n'event and pi_cs0_n='1' then
-        -- software will be simpler if we allow 2-byte (1-byte?) write as well as full write
-        -- currently writing all stuff even when it is only meaningless padding...   should improve
-        -- this scheme someday
         if k=csr_main'high+1 then      -- ONLY if we got EXACTLY the expected number of sclk's !!
           csr_main <= csr_main_shadow; -- if there will be some read-only bits in future, leave them out of this of course
         elsif k=16 then                -- OR ALTERNATIVELY if we got 16 then it's a write of just the high two bytes!
@@ -138,10 +136,11 @@ begin
                else asdo when csr_main(csr_main'high-1)='1'
                else bsdo;
   end block csr_blk;
-  init_delay <= to_integer(unsigned(csr_main(55 downto 40)));
-  pp_delay <= to_integer(unsigned(csr_main(39 downto 24)));
-  p_width <= to_integer(unsigned(csr_main(23 downto 8)));
-  kpulsemax <= to_integer(unsigned(csr_main(3 downto 0)));
+  init_delay(0) <= to_integer(unsigned(csr_main(55 downto 40)));
+  pp_delay(0) <= to_integer(unsigned(csr_main(39 downto 24)));
+  p_width(0) <= to_integer(unsigned(csr_main(23 downto 8)));
+  kpulsemax(0) <= to_integer(unsigned(csr_main(3 downto 0)));
+  polinv(0) <= csr_main(7);
   
   clksel <= csr_main(csr_main'high-5);
 
@@ -149,8 +148,6 @@ begin
   bsel <= '1';
   async <= csr_main(csr_main'high-3);
   bsync <= csr_main(csr_main'high-3);
-
-  --bd <= (others => '0');
 
   -- old stuff, save for now, but really not the way to do it!
   --x1: IBUFDS port map(I=> apclk_p, IB => apclk_n, O => apclk_i);  if re-instating, invert here for sanity?
@@ -187,48 +184,63 @@ begin
   -- computing like this. Maybe implement that option some other day.
   process(apclk)
   begin
-    if apclk'event and apclk='1' then -- rising edge here corresponds to falling edge out of MC100EP446
-      if idle='1' then
-        jj <= jj-1;
-        ad_pre <= (others => '0');
-        if jj=0 then                    -- temporary trigger
-          idle <= '0';
-          k <= 0;
-          kpulse <= 0;
-          auxo0_n <= '0';               -- sync output on LEMO conn
-          -- if it really still doesn't meet timing, try 8 different pstart/finish (ie.
-          -- std_logic_vector of them) so that we absorb the k+j and k+7 below. all we have to do is
-          -- offset the initial values, which anyway are "static" calculations and not really to
-          -- cover by apclk timing constraint. (check if they are, if they are trouble.)
-          pstart <= init_delay;         -- time (pattern tics) to start a pulse (first 1 of pulse)
-          pfinish <= init_delay+p_width;  -- time to finish a pulse (first 0 after pulse)
-        end if;
+    if apclk'event and apclk='1' then
+      if jj=0 then
+        jj <= 100000;
       else
-        k <= k+8;
-        auxo0_n <= '1';
-        -- for now, must have pp_delay>=p_width+8, so we handle one pulse at a time in this !!
-        -- the issue is that switching to next pulse takes a whole cycle (8 tics of pattern clock)!
-        for j in 0 to 7 loop
-          ad_pre(j) <= bool2std(k+j>=pstart and k+j<pfinish);  -- xor this with polarity bit, later
-        end loop;
-        if k+7>=pfinish then  -- finished a pulse on this cycle? then kpulse++ and update pstart/finish
-          if kpulse=kpulsemax then
-            idle <= '1';
-            jj <= 100000;               -- hack periodic trigger
-          else
-            kpulse <= kpulse+1;
-            pstart <= pstart+pp_delay;
-            pfinish <= pfinish+pp_delay;
-          end if;
-        end if;
+        jj <= jj-1;
       end if;
-      -- ad <= ad_pre;   put this back; had to make explicit ad_int bd_int so as not to optimize
-      -- away the registers for this test
-      -- also in xdc file, "_d_int_reg" --> _d_reg again...
-      ad_int <= ad_pre; -- extra pipeline stage here harmless, and might help timing
-      bd_int <= ad_pre; -- testing hack just use A data for first try
+      auxo0_n <= not go;      -- sync out on LEMO conn
+      auxo1 <= go;        -- sync out LVDS on RJ45
     end if;
   end process;
+  go <= bool2std(jj=0) and idle;  -- later: select trigger from auxin0 or the timer
+  pat1: block
+    signal kpulse: integer range 0 to 2**4-1;
+    signal k,pstart,pfinish: integer range 0 to ((2**4)+2)*(2**16-1);
+    signal d_pre: std_logic_vector(ad'range);
+  begin
+    process(apclk)
+    begin
+      if apclk'event and apclk='1' then -- rising edge here corresponds to falling edge out of MC100EP446
+        if idle='1' then
+          d_pre <= (others => polinv(0));
+          if go='1' then
+            idle <= '0';
+            k <= 0;
+            kpulse <= 0;
+            -- if it really still doesn't meet timing, try 8 different pstart/finish (ie.
+            -- std_logic_vector of them) so that we absorb the k+j and k+7 below. all we have to do is
+            -- offset the initial values, which anyway are "static" calculations and not really to
+            -- cover by apclk timing constraint. (check if they are, if they are trouble.)
+            pstart <= init_delay(0);         -- time (pattern tics) to start a pulse (first 1 of pulse)
+            pfinish <= init_delay(0)+p_width(0);  -- time to finish a pulse (first 0 after pulse)
+          end if;
+        else
+          k <= k+8;
+          -- for now, must have pp_delay>=p_width+8, so we handle one pulse at a time in this !!
+          -- the issue is that switching to next pulse takes a whole cycle (8 tics of pattern clock)!
+          for j in 0 to 7 loop
+            d_pre(j) <= bool2std(k+j>=pstart and k+j<pfinish) xor polinv(0);
+          end loop;
+          if k+7>=pfinish then  -- finished a pulse on this cycle? then kpulse++ and update pstart/finish
+            if kpulse=kpulsemax(0) then
+              idle <= '1';
+            else
+              kpulse <= kpulse+1;
+              pstart <= pstart+pp_delay(0);
+              pfinish <= pfinish+pp_delay(0);
+            end if;
+          end if;
+        end if;
+        -- ad <= ad_pre;   put this back; had to make explicit ad_int bd_int so as not to optimize
+        -- away the registers for this test
+        -- also in xdc file, "_d_int_reg" --> _d_reg again...
+        ad_int <= d_pre; -- extra pipeline stage here harmless, and might help timing
+        bd_int <= d_pre; -- testing hack just use A data for first try
+      end if;
+    end process;
+  end block;
 
   ad <= ad_int;
   bd <= bd_int;

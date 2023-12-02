@@ -28,7 +28,7 @@ int main(int argc, char *argv[]) {
   uint8_t rx_buf[32];
   int ix,k,ret;
   double init_delay_ns[2]={0.0,0.0},pp_delay_ns[2]={20.0,20.0},p_width_ns[2]={2.0,2.0};
-  int ch=0,init_delay[2],pp_delay[2],p_width[2],npulses[2]={2,2},atten[2]={32,32};
+  int ch=0,init_delay[2],pp_delay[2],p_width[2],npulses[2]={2,2},pol[2]={0,0},atten[2]={32,32};
   double tici=0.6,tic,fin,fout,fvco;
   int pll_R,pll_N,pll_BD,pll_MDA,pll_MDB,clksel;
   double pll_P;
@@ -50,7 +50,7 @@ int main(int argc, char *argv[]) {
      0b0000000110000000,
      0b0000001000000000};
 
-  while((c = getopt(argc, argv, "t:c:i:s:w:n:a:")) != -1) {
+  while((c = getopt(argc, argv, "t:c:i:s:w:n:va:")) != -1) {
     switch(c) {
     case 't' :  // time tic in ns (1ns or 600ps, maybe 750, 800 added later))
       tici=atof(optarg);
@@ -77,6 +77,9 @@ int main(int argc, char *argv[]) {
       break;
     case 'n' :  // number of pulses
       npulses[ch] = atoi(optarg);
+      break;
+    case 'v' :  // inVert the pulse polarity
+      pol[ch] = 1;
       break;
     case 'a' :  // amplitude in V
       atten[ch] = (int) (-20*log10(atof(optarg)/1.6) + 0.5);
@@ -223,7 +226,7 @@ int main(int argc, char *argv[]) {
   // 2,3:  A init_delay 0 to 2**16-1
   // 4,5:  A pp_delay 0 to 2**16-1
   // 6,7:  A p_width 0 to 2**16-1
-  // 8:    A npulses-1, 0 to 2**4-1
+  // 8:    A npulses-1, 0 to 2**4-1, polarity
   //-----------------------------------------------------------------------------------------------
   tx_buf[ix=0] = 0x90 | (clksel<<2); // set device 1 to the PLL (using device 0), and assert MC100EP446 SYNC
   tx_buf[++ix] = 0x00;
@@ -401,7 +404,7 @@ int main(int argc, char *argv[]) {
   tx_buf[++ix]=pp_delay[0]&0xff;
   tx_buf[++ix]=p_width[0]>>8;
   tx_buf[++ix]=p_width[0]&0xff;
-  tx_buf[++ix]=npulses[0]-1;
+  tx_buf[++ix]=(npulses[0]-1)|(pol[0]<<7);
   spit[0].len = ++ix;
   ret = ioctl(spifd[0], SPI_IOC_MESSAGE(1), &spit[0]);
   if(ret<0) {
