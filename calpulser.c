@@ -27,8 +27,8 @@ int main(int argc, char *argv[]) {
   uint8_t tx_buf[32];
   uint8_t rx_buf[32];
   int ix,k,ret;
-  double init_delay_ns[2]={0.0,0.0},pp_delay_ns[2]={20.0,20.0},p_width_ns[2]={2.0,2.0};
-  int ext=0,ch=0,init_delay[2],pp_delay[2],p_width[2],npulses[2]={2,2},pol[2]={0,0},atten[2]={32,32};
+  double trig_delay_ns=1e6,init_delay_ns[2]={0.0,0.0},pp_delay_ns[2]={20.0,20.0},p_width_ns[2]={2.0,2.0};
+  int trig_delay,ext=0,ch=0,init_delay[2],pp_delay[2],p_width[2],npulses[2]={2,2},pol[2]={0,0},atten[2]={32,32};
   double tici=0.6,tic,fin,fout,fvco;
   int pll_R,pll_N,pll_BD,pll_MDA,pll_MDB,clksel;
   double pll_P;
@@ -50,10 +50,13 @@ int main(int argc, char *argv[]) {
      0b0000000110000000,
      0b0000001000000000};
 
-  while((c = getopt(argc, argv, "t:ec:i:s:w:n:va:")) != -1) {
+  while((c = getopt(argc, argv, "t:p:ec:i:s:w:n:va:")) != -1) {
     switch(c) {
-    case 't' :  // time tic in ns (1ns or 600ps, maybe 750, 800 added later))
+    case 't' :  // time tic in ns (0.5, 0.6, 1.0, 6.0, more later)
       tici=atof(optarg);
+      break;
+    case 'p' :  // internal trigger period in ns
+      trig_delay_ns=atof(optarg);
       break;
     case 'e' :  // use external (AUXI1) trigger instead of internal timer trigger
       ext=1;
@@ -70,6 +73,7 @@ int main(int argc, char *argv[]) {
       }
       break;
     case 'i' :  // initial delay in ns
+      // NOTE: Measured skew ch1 relative to ch0 is about 250 ps, roughly as expected
       init_delay_ns[ch]=atof(optarg);
       break;
     case 's' :  // pulse-pulse delay in ns;  REQUIREMENT: pp_delay>=p_width+8  !!!
@@ -78,7 +82,7 @@ int main(int argc, char *argv[]) {
     case 'w' :  // pulse width in ns
       p_width_ns[ch]=atof(optarg);
       break;
-    case 'n' :  // number of pulses
+    case 'n' :  // number of pulses 1-16 (17?), can make it larger if needed; I forgot to enforce range on this...
       npulses[ch] = atoi(optarg);
       break;
     case 'v' :  // inVert the pulse polarity
@@ -148,6 +152,9 @@ int main(int argc, char *argv[]) {
   fout=fin/pll_R*pll_N;
   tic=1.0/fout;
 
+  // ought to check range, here and elsewhere, to be added someday
+  trig_delay= (uint32_t) (trig_delay_ns/(8*tic) + 0.5 - 1);    // this is a prescaler load, 0 is a count too, hence -1 here
+
   for(ch=0;ch<2;ch++) {
     init_delay[ch] = (int) (init_delay_ns[ch]/tic + 0.5);
     pp_delay[ch] = (int) (pp_delay_ns[ch]/tic + 0.5);
@@ -155,7 +162,9 @@ int main(int argc, char *argv[]) {
   }
 
   printf("TOP pulser setup:\nNote: your selections were rounded to nearest actual values\n");
-  printf("tic size %7.5lf ns, trigger %s\n",tic,(ext?"external":"internal"));
+  printf("tic size %7.5lf ns, %s trigger\n",tic,(ext?"external":"internal"));
+  if (!ext)
+    printf("internal trigger period %.3lf ns\n",(trig_delay+1)*8*tic);
   printf("  LTC6951 will be set for fout=%7.5lf GHz, fvco=%7.5lf GHz\n",fout,fvco);
   for(ch=0;ch<2;ch++) {
     printf("ch %d: initial delay %d tics (%.3lf ns), ",ch,init_delay[ch],init_delay[ch]*tic);
@@ -225,13 +234,14 @@ int main(int argc, char *argv[]) {
   //     11: APCLK MMCM reset bit
   //     10: clksel (1: local, 0: FTSW)
   //      9: trigsel (: external AUXIN0, 0: internal timer)
-  //     8-0 not used
-  //to be added: 32 bits trigger timer
-  // 2,3:  A init_delay 0 to 2**16-1
-  // 4,5:  A pp_delay 0 to 2**16-1
-  // 6,7:  A p_width 0 to 2**16-1
-  // 8:    A npulses-1, 0 to 2**4-1, polarity
-  // 9-15: B pattern controls, correspondingly
+  //      8: enable SPI 1 to FPGA config flash (N25Q032A13ESFA0F)
+  //     7-0 not used
+  // 2-5: 32 bits internal trigger timer
+  // 6,7:  A init_delay 0 to 2**16-1
+  // 8,9:  A pp_delay 0 to 2**16-1
+  // 10,11:  A p_width 0 to 2**16-1
+  // 12:    A npulses-1, 0 to 2**4-1, polarity
+  // 13-19: B pattern controls, correspondingly
   //-----------------------------------------------------------------------------------------------
   tx_buf[ix=0] = 0x90 | (clksel<<2) | (ext<<1); // set device 1 to the PLL (using device 0), and assert MC100EP446 SYNC
   tx_buf[++ix] = 0x00;
@@ -403,6 +413,10 @@ int main(int argc, char *argv[]) {
   // set device 1 to the VGA B (using device 0) & set pulse characteristics
   tx_buf[ix=0] = 0x20 | (clksel<<2) | (ext<<1);
   tx_buf[++ix] = 0x00;
+  tx_buf[++ix]=(trig_delay&0xff000000)>>24;
+  tx_buf[++ix]=(trig_delay&0x00ff0000)>>16;
+  tx_buf[++ix]=(trig_delay&0x0000ff00)>>8;
+  tx_buf[++ix]=(trig_delay&0x000000ff);
   for(ch=0;ch<2;ch++) {
     tx_buf[++ix]=init_delay[ch]>>8;
     tx_buf[++ix]=init_delay[ch]&0xff;

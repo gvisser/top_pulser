@@ -36,6 +36,8 @@ entity calpulser is
     asdo: in std_logic;
     bsclk,bsdi,bcs_n: out std_logic;
     bsdo: in std_logic;
+    fsclk,fsdo,fcs_n: out std_logic;
+    fsdi: in std_logic;
 
     asel,async: out std_logic;
     ad: out std_logic_vector(0 to 7);
@@ -55,6 +57,7 @@ architecture calpulser_0 of calpulser is
   attribute PULLTYPE: string;
   attribute PULLTYPE of pllsdo,asdo: signal is "PULLDOWN";
   signal apclk: std_logic;
+  signal trig_delay: unsigned(31 downto 0); -- would have liked integer, but VHDL sucks in this regard
   type array_int_16 is array(natural range <>) of integer range 0 to 2**16-1;
   type array_int_4 is array(natural range <>) of integer range 0 to 2**4-1;
   signal init_delay: array_int_16(0 to 1);
@@ -64,8 +67,8 @@ architecture calpulser_0 of calpulser is
   signal polinv: std_logic_vector(0 to 1);
   signal idle: std_logic_vector(0 to 1) := "11";
   signal trigsel,go: std_logic;
-  -- 2 byte super-csr + 7 byte channel-pattern csr per channel
-  signal csr_main: std_logic_vector((2+2*7)*8-1 downto 0) := (others => '0');
+  -- 2 byte super-csr + 4 byte trig_delay + 7 byte channel-pattern csr per channel
+  signal csr_main: std_logic_vector((2+4+2*7)*8-1 downto 0) := (others => '0');
   signal mmcm_locked: std_logic;
 begin
 
@@ -84,6 +87,10 @@ begin
   bsdi <= pi_mosi;
   bsclk <= pi_sclk;
   bcs_n <= not ((not pi_cs1_n) and csr_main(csr_main'high-2));
+  -- FPGA config SPI flash
+  fsdi <= pi_mosi;
+  fsclk <= pi_sclk; -- need to mask this off?
+  fcs_n <= not ((not pi_cs1_n) and csr_main(csr_main'high-7));
 
   -- local control registers (SPI device 0)
   -- Currently this does not support read-only, but I could easily use a bit in the written data (in
@@ -96,7 +103,7 @@ begin
   --    3: apclk MMCM reset
   --    2: clksel (1: local, 0: FTSW)
   --    1: trgsel (1: external AUXIN0, 0: internal timer)
-  --    0:
+  --    0: enable SPI 1 to FPGA config flash (N25Q032A13ESFA0F)
   csr_blk: block
     signal csr_main_shadow: std_logic_vector(csr_main'range);
     signal k: integer range 0 to csr_main'high+2;
@@ -130,8 +137,10 @@ begin
     pi_miso <= csr_main_shadow(csr_main'high) when pi_cs0_n='0'
                else pllsdo when csr_main(csr_main'high)='1'
                else asdo when csr_main(csr_main'high-1)='1'
-               else bsdo;
+               else bsdo when csr_main(csr_main'high-2)='1'
+               else fsdo;
   end block csr_blk;
+  trig_delay <= unsigned(csr_main(143 downto 112));
   c1: for i in 1 downto 0 generate -- note, order in writing in SW is ch0 stuff first then ch1 stuff
     init_delay(1-i) <= to_integer(unsigned(csr_main(55+56*i downto 40+56*i)));
     pp_delay(1-i) <= to_integer(unsigned(csr_main(39+56*i downto 24+56*i)));
@@ -179,14 +188,14 @@ begin
   
   ---------------------------------------------------------------------------------------------------
   trig: block
-    signal jj: integer range 0 to 99999 := 99999;  -- internal trigger
+    signal jj: unsigned(31 downto 0);
     signal ext_r,ext_r2,ext_r3: std_logic;
   begin
     process(apclk)
     begin
       if apclk'event and apclk='1' then
         if jj=0 then
-          jj <= 99999;       -- internal trigger interval fixed at 100k tics for now
+          jj <= trig_delay;
         else
           jj <= jj-1;
         end if;
