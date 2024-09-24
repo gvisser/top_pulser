@@ -18,6 +18,59 @@
 //#include <linux/types.h>   // is this really needed? seems like not
 #include <linux/spi/spidev.h>
 
+int do_config_download(char *flash_filename, int *spifd) {
+  struct spi_ioc_transfer spit[2];
+  uint32_t tmp;
+  uint8_t tx_buf[32];
+  uint8_t rx_buf[32];
+  int ix,k,ret;
+
+
+  // see main CSR bit descriptions below
+
+  // I should be able to refer to spit in main below... rather than doing over here. later clean-up
+  memset(&spit,0,sizeof(spit));  // there are other fields, which should all be 0 !!
+  spit[0].tx_buf = (uint32_t) tx_buf;
+  spit[0].rx_buf = (uint32_t) rx_buf;
+  //spit.bits_per_word = 0;
+  spit[0].speed_hz = 200000; // MHz, and seems to have good resolution at least for around few MHz
+  // HUH? did I really mean 200 MHZz??? Seems unlikely, should this have been 20?????
+  //spit.delay_usecs = 0;
+  //  (spit.len is filled in for each transfer, below)
+  spit[1].tx_buf = (uint32_t) tx_buf;   // we just use same buffer, for convenience
+  spit[1].rx_buf = (uint32_t) rx_buf;   // ditto
+  spit[1].speed_hz = 200000;
+
+
+  tx_buf[ix=0] = 0x01; // set device 1 to the config memory
+  tx_buf[++ix] = 0x00;
+  spit[0].len = ++ix;
+  ret = ioctl(spifd[0], SPI_IOC_MESSAGE(1), &spit[0]);
+  if(ret<0) {
+    perror("[0] SPI transfer ioctl ERROR");
+  }
+  printf("[0] Received SPI buffer: ");
+  for(k=0; k<spit[0].len;k++) {
+    printf("%02x ",rx_buf[k]);
+  }
+  printf("\n");
+
+  // a dummy access may be needed here to force the CCLK switchover??? 00 00 should be safe I think
+
+  // read
+  tx_buf[0] = 0x9f;
+  spit[1].len=18;
+  ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
+  if(ret<0) {
+    perror("[1] SPI transfer ioctl ERROR");
+  }
+  printf("[1] Received SPI buffer: ");
+  for(k=0; k<spit[1].len;k++) {
+    printf("%02x ",rx_buf[k]);
+  }
+
+}
+
 int main(int argc, char *argv[]) {
   extern char *optarg;
   int c;
@@ -26,6 +79,7 @@ int main(int argc, char *argv[]) {
   uint32_t tmp;
   uint8_t tx_buf[32];
   uint8_t rx_buf[32];
+  char *flash_filename=NULL;
   int ix,k,ret;
   double trig_delay_ns=1e6,init_delay_ns[2]={0.0,0.0},pp_delay_ns[2]={20.0,20.0},p_width_ns[2]={2.0,2.0};
   int trig_delay,ext=0,ch=0,init_delay[2],pp_delay[2],p_width[2],npulses[2]={2,2},pol[2]={0,0},atten[2]={32,32};
@@ -50,7 +104,7 @@ int main(int argc, char *argv[]) {
      0b0000000110000000,
      0b0000001000000000};
 
-  while((c = getopt(argc, argv, "t:p:ec:i:s:w:n:va:")) != -1) {
+  while((c = getopt(argc, argv, "t:p:ec:i:s:w:n:va:F:")) != -1) {
     switch(c) {
     case 't' :  // time tic in ns (0.5, 0.6, 1.0, 6.0, more later)
       tici=atof(optarg);
@@ -95,6 +149,9 @@ int main(int argc, char *argv[]) {
       if (atten[ch]>32)
 	atten[ch]=32;
       break;
+    case 'F' : // ignore all other options, do a download of the FPGA config flash
+      flash_filename=optarg;
+      break;
     default :
       printf("invalid argument\n"
 	     "BTW - look at the getopt cases in calpulser.c for 'documentation' how to use, thank you\n");
@@ -102,87 +159,89 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  // Clock setups -- add more here -- nothing below '//////' line should be specific to any setup!
-  // For the moment not using delays (but maybe will need to for some clock setups).
-  // For the moment, using local oscillator only, need to work in here the FTSW clock stuff.
-  clksel=1; // values are 0: FTSW 1: local osc (40 MHz)
-  fin=0.040; // later fin will be set according to CLKSEL control and user input (about ext clock)
-  // Keep fVCO in range 4 - 5 GHz, and take care w/ B value, see datasheet.
-  // Avoid P=x.5 and M=1, due to subharmonic (see datasheet).
-  // Minimum P that fits each case is best, to allow for finest/any control of delays.
-  if (fabs(tici-0.5)<1e-6) {   // need to test    TBD whether the board can run reliably for 0.5 ns tics
-    pll_R=10;   // range 1 to 63
-    pll_N=500;  // range 2 to 511 (with RA0=1)
-    pll_P=2;    // allowed values 2, 2.5, 3, 3.5, 4
-    pll_BD=1;   // see table 11 "BD[3:0] Programming, RAO = 1" in LTC6951 datasheet
-    pll_MDA=0;  // for outputs 0-3, see table 15 "MDx[3:0] Programming"
-    pll_MDB=3;  // for output 4 (LVDS to FPGA, not really used at the moment)
-  }
-  else if (fabs(tici-0.6)<1e-6) {   // this is probably the best default/suggested tic
-    pll_R=12;   // range 1 to 63
-    pll_N=500;  // range 2 to 511 (with RA0=1)
-    pll_P=3;    // allowed values 2, 2.5, 3, 3.5, 4
-    pll_BD=1;   // see table 11 "BD[3:0] Programming, RAO = 1" in LTC6951 datasheet
-    pll_MDA=0;  // for outputs 0-3, see table 15 "MDx[3:0] Programming"
-    pll_MDB=3;  // for output 4 (LVDS to FPGA, not really used at the moment)
-  }
-  else if (fabs(tici-1.0)<1e-6) {   // need to test
-    pll_R=12;   // range 1 to 63
-    pll_N=300;  // range 2 to 511 (with RA0=1)
-    pll_P=2;    // allowed values 2, 2.5, 3, 3.5, 4
-    pll_BD=1;   // see table 11 "BD[3:0] Programming, RAO = 1" in LTC6951 datasheet
-    pll_MDA=1;  // for outputs 0-3, see table 15 "MDx[3:0] Programming"
-    pll_MDB=5;  // for output 4 (LVDS to FPGA, not really used at the moment)
-  }
-  else if (fabs(tici-6.0)<1e-6) {  // need to test   intended for some bench tests only
-    pll_R=12;   // range 1 to 63
-    pll_N=50;   // range 2 to 511 (with RA0=1)
-    pll_P=3;    // allowed values 2, 2.5, 3, 3.5, 4
-    // following BD setting follows the datasheet guidance but I don't understand it really... p14 oversimplified?
-    pll_BD=6;   // see table 11 "BD[3:0] Programming, RAO = 1" in LTC6951 datasheet
-    pll_MDA=3;  // for outputs 0-3, see table 15 "MDx[3:0] Programming"
-    pll_MDB=9;  // for output 4 (LVDS to FPGA, not really used at the moment)
-  }
-  else {
-    printf("requested time tic value not supported - exiting...\n");
-    return -1;
-  }
-
-  fvco=fin/pll_R*pll_N*pll_P*MD2M[pll_MDA];
-  fout=fin/pll_R*pll_N;
-  tic=1.0/fout;
-
-  // ought to check range, here and elsewhere, to be added someday
-  trig_delay= (uint32_t) (trig_delay_ns/(8*tic) + 0.5 - 1);    // this is a prescaler load, 0 is a count too, hence -1 here
-
-  for(ch=0;ch<2;ch++) {
-    init_delay[ch] = (int) (init_delay_ns[ch]/tic + 0.5);
-    pp_delay[ch] = (int) (pp_delay_ns[ch]/tic + 0.5);
-    p_width[ch] = (int) (p_width_ns[ch]/tic + 0.5);
-  }
-
-  printf("TOP pulser setup:\nNote: your selections were rounded to nearest actual values\n");
-  printf("tic size %7.5lf ns, %s trigger\n",tic,(ext?"external":"internal"));
-  if (!ext)
-    printf("internal trigger period %.3lf ns\n",(trig_delay+1)*8*tic);
-  printf("  LTC6951 will be set for fout=%7.5lf GHz, fvco=%7.5lf GHz\n",fout,fvco);
-  for(ch=0;ch<2;ch++) {
-    printf("ch %d: initial delay %d tics (%.3lf ns), ",ch,init_delay[ch],init_delay[ch]*tic);
-    if (npulses[ch]==1) {
-      printf("1 pulse, width %d tics (%.3lf ns)\n",p_width[ch],p_width[ch]*tic);
+  if (flash_filename==NULL) { // skip all this pulser setup stuff, if instead we are going to do flash download
+    // Clock setups -- add more here -- nothing below '//////' line should be specific to any setup!
+    // For the moment not using delays (but maybe will need to for some clock setups).
+    // For the moment, using local oscillator only, need to work in here the FTSW clock stuff.
+    clksel=1; // values are 0: FTSW 1: local osc (40 MHz)
+    fin=0.040; // later fin will be set according to CLKSEL control and user input (about ext clock)
+    // Keep fVCO in range 4 - 5 GHz, and take care w/ B value, see datasheet.
+    // Avoid P=x.5 and M=1, due to subharmonic (see datasheet).
+    // Minimum P that fits each case is best, to allow for finest/any control of delays.
+    if (fabs(tici-0.5)<1e-6) {   // need to test    TBD whether the board can run reliably for 0.5 ns tics
+      pll_R=10;   // range 1 to 63
+      pll_N=500;  // range 2 to 511 (with RA0=1)
+      pll_P=2;    // allowed values 2, 2.5, 3, 3.5, 4
+      pll_BD=1;   // see table 11 "BD[3:0] Programming, RAO = 1" in LTC6951 datasheet
+      pll_MDA=0;  // for outputs 0-3, see table 15 "MDx[3:0] Programming"
+      pll_MDB=3;  // for output 4 (LVDS to FPGA, not really used at the moment)
+    }
+    else if (fabs(tici-0.6)<1e-6) {   // this is probably the best default/suggested tic
+      pll_R=12;   // range 1 to 63
+      pll_N=500;  // range 2 to 511 (with RA0=1)
+      pll_P=3;    // allowed values 2, 2.5, 3, 3.5, 4
+      pll_BD=1;   // see table 11 "BD[3:0] Programming, RAO = 1" in LTC6951 datasheet
+      pll_MDA=0;  // for outputs 0-3, see table 15 "MDx[3:0] Programming"
+      pll_MDB=3;  // for output 4 (LVDS to FPGA, not really used at the moment)
+    }
+    else if (fabs(tici-1.0)<1e-6) {   // need to test
+      pll_R=12;   // range 1 to 63
+      pll_N=300;  // range 2 to 511 (with RA0=1)
+      pll_P=2;    // allowed values 2, 2.5, 3, 3.5, 4
+      pll_BD=1;   // see table 11 "BD[3:0] Programming, RAO = 1" in LTC6951 datasheet
+      pll_MDA=1;  // for outputs 0-3, see table 15 "MDx[3:0] Programming"
+      pll_MDB=5;  // for output 4 (LVDS to FPGA, not really used at the moment)
+    }
+    else if (fabs(tici-6.0)<1e-6) {  // need to test   intended for some bench tests only
+      pll_R=12;   // range 1 to 63
+      pll_N=50;   // range 2 to 511 (with RA0=1)
+      pll_P=3;    // allowed values 2, 2.5, 3, 3.5, 4
+      // following BD setting follows the datasheet guidance but I don't understand it really... p14 oversimplified?
+      pll_BD=6;   // see table 11 "BD[3:0] Programming, RAO = 1" in LTC6951 datasheet
+      pll_MDA=3;  // for outputs 0-3, see table 15 "MDx[3:0] Programming"
+      pll_MDB=9;  // for output 4 (LVDS to FPGA, not really used at the moment)
     }
     else {
-      printf("%d pulses, ",npulses[ch]);
-      if (pp_delay[ch]<p_width[ch]+8) {
-	pp_delay[ch] = p_width[ch]+8;
-	printf("\nWARNING: enforced minimum pulse-pulse delay\n");
-      }
-      printf("width %d tics (%.3lf ns), pulse-pulse delay %d tics (%.3lf ns)\n",
-	     p_width[ch],p_width[ch]*tic,pp_delay[ch],pp_delay[ch]*tic);
+      printf("requested time tic value not supported - exiting...\n");
+      return -1;
     }
-    printf("      amplitude %.3lf V (atten %d dB)\n",1.6*pow(10.0,-atten[ch]/20.0),atten[ch]);
-  }
-  printf("--------doing setup--------\n\n");
+
+    fvco=fin/pll_R*pll_N*pll_P*MD2M[pll_MDA];
+    fout=fin/pll_R*pll_N;
+    tic=1.0/fout;
+
+    // ought to check range, here and elsewhere, to be added someday
+    trig_delay= (uint32_t) (trig_delay_ns/(8*tic) + 0.5 - 1);    // this is a prescaler load, 0 is a count too, hence -1 here
+
+    for(ch=0;ch<2;ch++) {
+      init_delay[ch] = (int) (init_delay_ns[ch]/tic + 0.5);
+      pp_delay[ch] = (int) (pp_delay_ns[ch]/tic + 0.5);
+      p_width[ch] = (int) (p_width_ns[ch]/tic + 0.5);
+    }
+
+    printf("TOP pulser setup:\nNote: your selections were rounded to nearest actual values\n");
+    printf("tic size %7.5lf ns, %s trigger\n",tic,(ext?"external":"internal"));
+    if (!ext)
+      printf("internal trigger period %.3lf ns\n",(trig_delay+1)*8*tic);
+    printf("  LTC6951 will be set for fout=%7.5lf GHz, fvco=%7.5lf GHz\n",fout,fvco);
+    for(ch=0;ch<2;ch++) {
+      printf("ch %d: initial delay %d tics (%.3lf ns), ",ch,init_delay[ch],init_delay[ch]*tic);
+      if (npulses[ch]==1) {
+	printf("1 pulse, width %d tics (%.3lf ns)\n",p_width[ch],p_width[ch]*tic);
+      }
+      else {
+	printf("%d pulses, ",npulses[ch]);
+	if (pp_delay[ch]<p_width[ch]+8) {
+	  pp_delay[ch] = p_width[ch]+8;
+	  printf("\nWARNING: enforced minimum pulse-pulse delay\n");
+	}
+	printf("width %d tics (%.3lf ns), pulse-pulse delay %d tics (%.3lf ns)\n",
+	       p_width[ch],p_width[ch]*tic,pp_delay[ch],pp_delay[ch]*tic);
+      }
+      printf("      amplitude %.3lf V (atten %d dB)\n",1.6*pow(10.0,-atten[ch]/20.0),atten[ch]);
+    }
+    printf("--------doing setup--------\n\n");
+  } // flash_filename==NULL
   
   ////////////////////////////////////////////////////////////////////////////////////
   
@@ -224,17 +283,24 @@ int main(int argc, char *argv[]) {
     exit(-1);
   }
 
+  if (flash_filename!=NULL) {
+    do_config_download(flash_filename,spifd);
+    close(spifd[1]);
+    close(spifd[0]);
+    exit(0);
+  }
+
   //-----------------------------------------------------------------------------------------------
   // main CSR (device 0), may branch this off into addressable parts someday later
   // 0,1:  main CSR [15:0]
   //     15: enable SPI 1 to PLL (LTC6951)     use one only of these enable bits at a time!
-  //     14: enable SPI 1 to channel A VGA (LMH6401)
-  //     13: enable SPI 1 to channel B VGA
+  //     14: enable SPI 1 to channel A VGA (LMH6401)     use one only of these enable bits at a time!
+  //     13: enable SPI 1 to channel B VGA     use one only of these enable bits at a time!
   //     12: SYNC bit to A & B serializer chips (MC100EP446)
   //     11: APCLK MMCM reset bit
   //     10: clksel (1: local, 0: FTSW)
   //      9: trigsel (: external AUXIN0, 0: internal timer)
-  //      8: enable SPI 1 to FPGA config flash (N25Q032A13ESFA0F)
+  //      8: enable SPI 1 to FPGA config flash (N25Q032A13ESFA0F)     use one only of these enable bits at a time!
   //     7-0 not used
   // 2-5: 32 bits internal trigger timer
   // 6,7:  A init_delay 0 to 2**16-1

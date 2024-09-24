@@ -18,8 +18,8 @@ set_property PACKAGE_PIN B20 [get_ports bsdi]
 set_property PACKAGE_PIN D19 [get_ports bsdo]
 set_property PACKAGE_PIN T19 [get_ports fcs_n];  # aka FCS_N
 #set_property PACKAGE_PIN L12 [get_ports fsclk];  # aka CCLK   SPECIAL HANDLING THROUGH STARTUPE2, not a 'regular' I/O pin
-set_property PACKAGE_PIN R22 [get_ports fsdi];   # aka DIN
-set_property PACKAGE_PIN P22 [get_ports fsdo];   # aka MOSI
+set_property PACKAGE_PIN P22 [get_ports fsdi];   # aka MOSI
+set_property PACKAGE_PIN R22 [get_ports fsdo];   # aka DIN
 set_property PACKAGE_PIN K19 [get_ports clksel]
 set_property PACKAGE_PIN J20 [get_ports asel]
 set_property PACKAGE_PIN AA20 [get_ports async]
