@@ -36,8 +36,9 @@ entity calpulser is
     asdo: in std_logic;
     bsclk,bsdi,bcs_n: out std_logic;
     bsdo: in std_logic;
-    fsclk,fsdo,fcs_n: out std_logic;
-    fsdi: in std_logic;
+    -- signal fsclk is CCLK pin, fed through STARTUPE2 primitive; see UG470 about 3 cycle init!
+    fsdi,fcs_n: out std_logic;   -- pins MOSI, FCS_N
+    fsdo: in std_logic;                --   and DIN
 
     asel,async: out std_logic;
     ad: out std_logic_vector(0 to 7);
@@ -70,6 +71,7 @@ architecture calpulser_0 of calpulser is
   -- 2 byte super-csr + 4 byte trig_delay + 7 byte channel-pattern csr per channel
   signal csr_main: std_logic_vector((2+4+2*7)*8-1 downto 0) := (others => '0');
   signal mmcm_locked: std_logic;
+  signal fsclk: std_logic;
 begin
 
   -- LED's viewed from front:  0  1  2  3
@@ -91,7 +93,12 @@ begin
   fsdi <= pi_mosi;
   fsclk <= pi_sclk; -- need to mask this off?
   fcs_n <= not ((not pi_cs1_n) and csr_main(csr_main'high-7));
-
+  
+  x1: STARTUPE2 port map(
+    CFGCLK => open, CFGMCLK => open, EOS => open, PREQ => open,
+    CLK => '0', GSR => '0', GTS => '0', KEYCLEARB => '1', PACK => '0',
+    USRCCLKO => fsclk, USRCCLKTS => '0', USRDONEO => '0', USRDONETS => '0');
+  
   -- local control registers (SPI device 0)
   -- Currently this does not support read-only, but I could easily use a bit in the written data (in
   -- shadow register) to select whether to really write the data out. Do this later, if relevant.
