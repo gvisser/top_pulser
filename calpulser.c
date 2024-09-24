@@ -21,8 +21,8 @@
 int do_config_download(char *flash_filename, int *spifd) {
   struct spi_ioc_transfer spit[2];
   uint32_t tmp;
-  uint8_t tx_buf[32];
-  uint8_t rx_buf[32];
+  uint8_t tx_buf[300];  // the buffers must be large enough for page program
+  uint8_t rx_buf[300];
   int ix,k,ret;
 
 
@@ -56,10 +56,11 @@ int do_config_download(char *flash_filename, int *spifd) {
   printf("\n");
 
   // a dummy access may be needed here to force the CCLK switchover??? 00 00 should be safe I think
+  // it doesn't seem to be needed -- but that may be because I've configured by JTAG for now, not SPI slave mode
 
-  // read
+  // read ID
   tx_buf[0] = 0x9f;
-  spit[1].len=18;
+  spit[1].len=20;
   ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
   if(ret<0) {
     perror("[1] SPI transfer ioctl ERROR");
@@ -68,7 +69,130 @@ int do_config_download(char *flash_filename, int *spifd) {
   for(k=0; k<spit[1].len;k++) {
     printf("%02x ",rx_buf[k]);
   }
+  printf("\n");
+  const uint8_t expect_id[6]={0x20,0xba,0x16,0x10,0x00,0x00};
+  if (memcmp(rx_buf+1,&expect_id,6)) {
+    printf("ID code does not match!\n");
+    return -1;
+  }
 
+  // read flag/status register
+  tx_buf[0] = 0x70;
+  spit[1].len=2;
+  ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
+  if(ret<0) {
+    perror("[1] SPI transfer ioctl ERROR");
+  }
+  //printf("[1] Received SPI buffer: ");
+  //for(k=0; k<spit[1].len;k++) {
+  //  printf("%02x ",rx_buf[k]);
+  //}
+  //printf("\n");
+  if (rx_buf[1]!=0x80) {
+    printf("unexpected flag/status before erase, %02x\n",rx_buf[1]);
+    return -1;
+  }
+
+  // here should ask are you sure...
+
+  // ERASE
+  printf("erasing -- hang on a bit it takes a little while...\n");
+  // write enable (one-time key)
+  tx_buf[0] = 0x06;
+  spit[1].len=1;
+  ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
+  if(ret<0) {
+    perror("[1] SPI transfer ioctl ERROR");
+  }
+  // there is no readback data from write enable command, so ignore rx_buf from that
+  /* printf("[1] Received SPI buffer: "); */
+  /* for(k=0; k<spit[1].len;k++) { */
+  /*   printf("%02x ",rx_buf[k]); */
+  /* } */
+  /* printf("\n"); */
+  // erase (all)
+  tx_buf[0] = 0xc7;
+  spit[1].len=1;
+  ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
+  if(ret<0) {
+    perror("[1] SPI transfer ioctl ERROR");
+  }
+  // there is no readback data from erase command, so ignore rx_buf from that
+  /* printf("[1] Received SPI buffer: "); */
+  /* for(k=0; k<spit[1].len;k++) { */
+  /*   printf("%02x ",rx_buf[k]); */
+  /* } */
+  /* printf("\n"); */
+  do {
+    tx_buf[0] = 0x70;
+    spit[1].len=2;
+    ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
+    if(ret<0) {
+      perror("[1] SPI transfer ioctl ERROR");
+    }
+    //printf("[1] Received SPI buffer: ");
+    //for(k=0; k<spit[1].len;k++) {
+    //  printf("%02x ",rx_buf[k]);
+    //}
+    //printf("\n");
+    usleep(100000);
+  } while (rx_buf[1]==0x00);
+  if (rx_buf[1]!=0x80) {
+    printf("something wrong in erase operation, completed with flag/status %02x\n",rx_buf[1]);
+    return -1;
+  }
+  printf("erase completed\n");
+
+  // program
+  printf("programming...\n");
+  // write enable (one-time key)
+  tx_buf[0] = 0x06;
+  spit[1].len=1;
+  ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
+  if(ret<0) {
+    perror("[1] SPI transfer ioctl ERROR");
+  }
+  // there is no readback data from write enable command, so ignore rx_buf from that
+  /* printf("[1] Received SPI buffer: "); */
+  /* for(k=0; k<spit[1].len;k++) { */
+  /*   printf("%02x ",rx_buf[k]); */
+  /* } */
+  /* printf("\n"); */
+  // page program
+  tx_buf[ix=0] = 0x02;
+  tx_buf[++ix] = 0x00; // page addr high (test value)
+  tx_buf[++ix] = 0x00; // page addr low (test value)
+  tx_buf[++ix] = 0x00; // address into page, should be zero!
+  for(k=0;k<256;k++)
+    tx_buf[++ix] = k; //hack
+  spit[1].len=++ix;
+  ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
+  if(ret<0) {
+    perror("[1] SPI transfer ioctl ERROR");
+  }
+  // there is no readback data from page program command, so ignore rx_buf from that
+  do {
+    tx_buf[0] = 0x70;
+    spit[1].len=2;
+    ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
+    if(ret<0) {
+      perror("[1] SPI transfer ioctl ERROR");
+    }
+    //printf("[1] Received SPI buffer: ");
+    //for(k=0; k<spit[1].len;k++) {
+    //  printf("%02x ",rx_buf[k]);
+    //}
+    //printf("\n");
+    usleep(6000);   // maybe smaller better, 1000?
+  } while (rx_buf[1]==0x00);
+  if (rx_buf[1]!=0x80) {
+    printf("something wrong in program operation, completed with flag/status %02x\n",rx_buf[1]);
+    return -1;
+  }
+  printf("program completed\n");
+
+
+  return 0;
 }
 
 int main(int argc, char *argv[]) {
