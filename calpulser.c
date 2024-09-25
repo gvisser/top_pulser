@@ -20,13 +20,11 @@
 
 int do_config_download(char *flash_filename, int *spifd) {
   struct spi_ioc_transfer spit[2];
-  uint32_t tmp;
-  uint8_t tx_buf[300];  // the buffers must be large enough for page program
+  uint8_t tx_buf[300];  // these buffers must be large enough for page program
   uint8_t rx_buf[300];
-  int ix,k,ret;
-
-
-  // see main CSR bit descriptions below
+  char linebuf[100];
+  int k,ret;
+  int binfd;
 
   // I should be able to refer to spit in main below... rather than doing over here. later clean-up
   memset(&spit,0,sizeof(spit));  // there are other fields, which should all be 0 !!
@@ -41,22 +39,17 @@ int do_config_download(char *flash_filename, int *spifd) {
   spit[1].rx_buf = (uint32_t) rx_buf;   // ditto
   spit[1].speed_hz = 200000;
 
-
-  tx_buf[ix=0] = 0x01; // set device 1 to the config memory
-  tx_buf[++ix] = 0x00;
-  spit[0].len = ++ix;
+  // see main CSR bit descriptions below
+  tx_buf[0] = 0x01; // set device 1 to the config memory
+  tx_buf[1] = 0x00;
+  spit[0].len = 2;
   ret = ioctl(spifd[0], SPI_IOC_MESSAGE(1), &spit[0]);
   if(ret<0) {
     perror("[0] SPI transfer ioctl ERROR");
   }
-  printf("[0] Received SPI buffer: ");
-  for(k=0; k<spit[0].len;k++) {
-    printf("%02x ",rx_buf[k]);
-  }
-  printf("\n");
 
-  // a dummy access may be needed here to force the CCLK switchover??? 00 00 should be safe I think
-  // it doesn't seem to be needed -- but that may be because I've configured by JTAG for now, not SPI slave mode
+  // Possibly, a dummy access may be needed here to force the CCLK switchover??? 00 00 should be safe I think
+  // But it doesn't seem to be needed. Hmmm. Probably because CCLK active also in the SPI 0 access above! Duh.
 
   // read ID
   tx_buf[0] = 0x9f;
@@ -93,105 +86,100 @@ int do_config_download(char *flash_filename, int *spifd) {
     return -1;
   }
 
-  // here should ask are you sure...
+  binfd=open(flash_filename,O_RDONLY);
+  if(binfd < 0) {
+    perror("Could not open the bin file... ERROR");
+    return -1;
+  }
 
-  // ERASE
+  printf("FPGA configuration flash download from %s\n"
+	 "Confirm are you sure? Don't be wrong now!\n"
+	 "If file is no good, or power is interrupted, recovery will require Xilinx/JTAG connection.\n"
+	 "This should be a Xilinx .bin file, not .bit file.\n"
+	 "So are you sure? Y/N? ",flash_filename);
+  // the only go-ahead answers have first word exactly just 'Y' !!
+  if ((fgets(linebuf,sizeof(linebuf),stdin)==NULL)||(strtok(linebuf," \t\n")==NULL)
+      ||(strcmp(linebuf,"Y"))) {
+    close(binfd);
+    return -2;
+  }
+  
+  // first have to erase
   printf("erasing -- hang on a bit it takes a little while...\n");
-  // write enable (one-time key)
-  tx_buf[0] = 0x06;
+  tx_buf[0] = 0x06;   // write enable (one-time key), there is no read data from this
   spit[1].len=1;
   ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
   if(ret<0) {
     perror("[1] SPI transfer ioctl ERROR");
   }
-  // there is no readback data from write enable command, so ignore rx_buf from that
-  /* printf("[1] Received SPI buffer: "); */
-  /* for(k=0; k<spit[1].len;k++) { */
-  /*   printf("%02x ",rx_buf[k]); */
-  /* } */
-  /* printf("\n"); */
-  // erase (all)
-  tx_buf[0] = 0xc7;
+
+  tx_buf[0] = 0xc7;   // erase all (aka "bulk"), there is no read data from this
   spit[1].len=1;
   ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
   if(ret<0) {
     perror("[1] SPI transfer ioctl ERROR");
   }
-  // there is no readback data from erase command, so ignore rx_buf from that
-  /* printf("[1] Received SPI buffer: "); */
-  /* for(k=0; k<spit[1].len;k++) { */
-  /*   printf("%02x ",rx_buf[k]); */
-  /* } */
-  /* printf("\n"); */
-  do {
+  do {                // poll status until done
     tx_buf[0] = 0x70;
     spit[1].len=2;
     ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
     if(ret<0) {
       perror("[1] SPI transfer ioctl ERROR");
     }
-    //printf("[1] Received SPI buffer: ");
-    //for(k=0; k<spit[1].len;k++) {
-    //  printf("%02x ",rx_buf[k]);
-    //}
-    //printf("\n");
     usleep(100000);
   } while (rx_buf[1]==0x00);
   if (rx_buf[1]!=0x80) {
-    printf("something wrong in erase operation, completed with flag/status %02x\n",rx_buf[1]);
+    printf("something wrong in erase operation -- completed with flag/status %02x\n",rx_buf[1]);
     return -1;
   }
   printf("erase completed\n");
 
   // program
-  printf("programming...\n");
-  // write enable (one-time key)
-  tx_buf[0] = 0x06;
-  spit[1].len=1;
-  ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
-  if(ret<0) {
-    perror("[1] SPI transfer ioctl ERROR");
-  }
-  // there is no readback data from write enable command, so ignore rx_buf from that
-  /* printf("[1] Received SPI buffer: "); */
-  /* for(k=0; k<spit[1].len;k++) { */
-  /*   printf("%02x ",rx_buf[k]); */
-  /* } */
-  /* printf("\n"); */
-  // page program
-  tx_buf[ix=0] = 0x02;
-  tx_buf[++ix] = 0x00; // page addr high (test value)
-  tx_buf[++ix] = 0x00; // page addr low (test value)
-  tx_buf[++ix] = 0x00; // address into page, should be zero!
-  for(k=0;k<256;k++)
-    tx_buf[++ix] = k; //hack
-  spit[1].len=++ix;
-  ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
-  if(ret<0) {
-    perror("[1] SPI transfer ioctl ERROR");
-  }
-  // there is no readback data from page program command, so ignore rx_buf from that
+  printf("downloading...\n");
+  int nbytes,nbytestot=0,paddr=0;
   do {
-    tx_buf[0] = 0x70;
-    spit[1].len=2;
+    tx_buf[0] = 0x06;   // write enable (one-time key), there is no read data from this
+    spit[1].len=1;
     ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
     if(ret<0) {
       perror("[1] SPI transfer ioctl ERROR");
     }
-    //printf("[1] Received SPI buffer: ");
-    //for(k=0; k<spit[1].len;k++) {
-    //  printf("%02x ",rx_buf[k]);
-    //}
-    //printf("\n");
-    usleep(6000);   // maybe smaller better, 1000?
-  } while (rx_buf[1]==0x00);
-  if (rx_buf[1]!=0x80) {
-    printf("something wrong in program operation, completed with flag/status %02x\n",rx_buf[1]);
-    return -1;
-  }
-  printf("program completed\n");
 
-
+    tx_buf[0] = 0x02;    // page write, there is no read data from this
+    tx_buf[1] = (paddr&0xff00)>>8;
+    tx_buf[2] = paddr&0x00ff;
+    tx_buf[3] = 0x00;    // address into page, should be zero!
+    nbytes=read(binfd,tx_buf+4,256);
+    //if (nbytes<256)
+    //  printf("got nbytes %d once\n",nbytes);
+    if (nbytes==0)       // hit EOF, basically
+      break;
+    spit[1].len=4+nbytes;
+    ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
+    if(ret<0) {
+      perror("[1] SPI transfer ioctl ERROR");
+    }
+    do {              // poll status until done
+      tx_buf[0] = 0x70;
+      spit[1].len=2;
+      ret = ioctl(spifd[1], SPI_IOC_MESSAGE(1), &spit[1]);
+      if(ret<0) {
+	perror("[1] SPI transfer ioctl ERROR");
+      }
+      usleep(1000);
+    } while (rx_buf[1]==0x00);
+    if (rx_buf[1]!=0x80) {
+      printf("something wrong in program operation -- completed with flag/status %02x\n",rx_buf[1]);
+      close(binfd);
+      return -1;
+    }
+    printf("page %05d done\r",paddr);
+    nbytestot+=nbytes;
+    paddr++;
+  } while ((paddr<16384)&&(nbytestot<2200000));   // don't go past end of memory (or much past expected bin file size!)
+  printf("\ndownload completed, %d bytes\n",nbytestot);
+  printf("verify not implemented yet... someday...\n");
+  close(binfd);
   return 0;
 }
 
@@ -343,7 +331,7 @@ int main(int argc, char *argv[]) {
       p_width[ch] = (int) (p_width_ns[ch]/tic + 0.5);
     }
 
-    printf("TOP pulser setup:\nNote: your selections were rounded to nearest actual values\n");
+    printf("TOP pulser setup:   (Note: your selections were rounded to nearest realizable values.)\n");
     printf("tic size %7.5lf ns, %s trigger\n",tic,(ext?"external":"internal"));
     if (!ext)
       printf("internal trigger period %.3lf ns\n",(trig_delay+1)*8*tic);
